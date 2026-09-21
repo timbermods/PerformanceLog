@@ -4,7 +4,7 @@ Version 0.1.0 has been tested without the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (72 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (37 checks).
+`dotnet run --project tests -c Release` (73 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (39 checks).
 
 | What | How |
 |---|---|
@@ -30,7 +30,7 @@ A mutation check confirmed the game-binding tests fail when a private field name
 3. **Bindito injection** of `SessionService` (six constructor parameters, all checked to be bound in the Game context, none exercised).
 4. **`ProfilerRecorder` counters and `FrameTimingManager`** in a release build: they may produce nothing (the log says so, and the columns stay 0).
 5. **Which allocation source the runtime offers** (`GC.GetAllocatedBytesForCurrentThread` may not exist under Unity's Mono; the log falls back to the heap size and says so).
-6. **Overhead**: the estimate is computed, not measured against an unmeasured game. Compare a run with `Enabled = false` to check.
+6. **Overhead**: the estimate is computed by the mod itself, not measured against a game running without it. Compare the frame rate with the mod turned off (see the checklist).
 7. **Co-op**: alongside BeaverBuddies (which replaces the tick loop). Counting ticks by entity buckets is meant to survive that; it has not been seen to.
 8. **The mod attribution** (which DLL belongs to which mod) depends on how the game lays out mod folders.
 
@@ -48,7 +48,8 @@ A mutation check confirmed the game-binding tests fail when a private field name
    `# capability-final|profilerRecorder|...` and `frameTiming` may legitimately say `never produced a value` in a release build.
 6. Compare the frame rate the game shows with `summary.md`'s mean; they should agree.
 7. Run `python tools/perflog.py report <folder>` and confirm it reads the folder without complaint.
-8. To see the cost, play the same save for the same time with `Enabled = false` (or the mod off) and compare frame times with `python tools/perflog.py compare`: the mod should be under 1-2%.
-   `overheadUs` and `probeUs` in the log are the mod's own estimate.
+8. To see the cost, play the same save for the same time at the same speed with the mod turned off in the mod manager and compare the frame rate with something outside the mod (Steam's
+   or the game's own FPS counter). The mod should cost under 1-2% of a frame. (With `Enabled = false` the mod writes no session at all, so there is nothing to `compare`.)
+   `overheadUs` and `probeUs` in the log are the mod's own estimate of what it costs; the report warns if they are more than 2% of a frame.
 
 If something is wrong, send Claude the session folder and the `[PerformanceLog]` lines from `Player.log`.

@@ -461,6 +461,20 @@ class FindingTests(unittest.TestCase):
         self.assertIn("The simulation takes", text)
         self.assertIn("entMs", text)
 
+    def test_gc_advice_reads_the_boot_config(self):
+        def gc_session(pipes):
+            s = Synthetic()
+            s.pipes.extend(pipes)
+            for _ in range(6):
+                s.window(gcDelta=1)
+            for i in range(6):
+                s.slow_frame(120.0, gcDelta=1.0)
+            return s
+        text = self.report(gc_session([["bootconfig", "gc-max-time-slice=3"]]))
+        self.assertIn("although boot.config has 'gc-max-time-slice=3'", text)
+        text = self.report(gc_session([["bootconfig", "gfx-enable-gfx-jobs=1"]]))
+        self.assertIn("boot.config has no gc-max-time-slice line", text)
+
     def test_a_tick_that_gets_slower(self):
         s = Synthetic()
         for i in range(12):

@@ -356,6 +356,18 @@ def vsync_interval(session):
     return None
 
 
+def gc_advice(session, incremental_off):
+    """What the recorded garbage collector settings say about long collection pauses."""
+    if not incremental_off:
+        return "The collector is incremental (%s), so long pauses are not from a stop-the-world collection; look at allocation. " % session.h("gc")
+    slice_lines = [b[0] for b in session.pipe("bootconfig") if b and b[0].lower().startswith("gc-max-time-slice")]
+    if slice_lines:
+        return ("The collector is not incremental (%s) although boot.config has '%s', so that setting is not taking effect in this session "
+                "(check it is in the game folder's Timberborn_Data/boot.config and that Steam has not restored the file). " % (session.h("gc"), slice_lines[0]))
+    return ("The collector is not incremental (%s) and boot.config has no gc-max-time-slice line. Incremental collection turns one long pause into many short ones; "
+            "it is set in boot.config before the game starts, not by a mod. " % session.h("gc"))
+
+
 def findings_for(session, args):
     """The pointers: what stands out, with the evidence and what to check next. Ordered by how much of the time they explain."""
     out = []
@@ -408,8 +420,7 @@ def findings_for(session, args):
                                "%d of %d slow frames contain a collection (median %.0f ms, worst %.0f ms); the game collects %.1f times a minute and allocates about %.0f KB per second." %
                                (len(gc_rows), len(slow), gm, max(r["frameMs"] for r in gc_rows), total(S, "gcDelta") / (secs / 60) if secs else 0,
                                 total(S, "allocKB") / secs if secs else 0),
-                               ("The collector is not incremental (%s). Incremental collection (boot.config gc-max-time-slice, if the game honours it) turns one long pause into many short ones; " % session.h("gc") if inc else "") +
-                               "Find what allocates most: the allocation table in the report and allocKB in profile.csv.", key="gc"))
+                               gc_advice(session, inc) + "Find what allocates most: the allocation table in the report and allocKB in profile.csv.", key="gc"))
         if save_rows:
             ev = [e for e in session.events if e["kind"] == "save"]
             detail = "; ".join("%.0f ms" % e["ms"] for e in ev[:5])
