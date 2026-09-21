@@ -1,0 +1,4 @@
+utcMs,tick,kind,ms,detail
+1767268800000,0,session-start,0.0,"sample session"
+1767268920446,796,save,430.0,"autosave: finishing the tick 20 ms, snapshot 150 ms, world json 200 ms, thumbnail 60 ms"
+1767269100004,2441,session-end,0.0,"sample session ended"
