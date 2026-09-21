@@ -1,0 +1,25 @@
+name: Analysis tool tests
+
+# The mod itself needs the game's assemblies to build, and those cannot be redistributed, so only the analysis tool (tools/perflog.py) is tested here.
+# It runs against tests/fixtures, which the mod's own code wrote (see tests/SampleSession.cs).
+on:
+  push:
+    paths: ["tools/**", "tests/fixtures/**", ".github/workflows/python-tests.yml"]
+  pull_request:
+    paths: ["tools/**", "tests/fixtures/**", ".github/workflows/python-tests.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.8", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run the tests
+        run: python -W error::ResourceWarning -m unittest discover -s tools -p "test_perflog.py"
+      - name: Report on the sample session
+        run: python tools/perflog.py report tests/fixtures/sample-with-mod --warmup 10
