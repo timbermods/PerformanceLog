@@ -371,6 +371,8 @@ def findings_for(session, args):
     mean = wmean(S, "frameMs")
     secs = seconds_of(S)
     ticks = sum(r["ticks"] for r in S)
+    if mean <= 0 or secs <= 0:
+        return [Finding("warn", "The frame times in this file add up to zero", "The file is empty or damaged, so there is nothing to find.")]
 
     # --- can the numbers be trusted?
     unfocused = sum(r["unfocused"] for r in allS) / max(1, sum(r["frames"] for r in allS))
@@ -563,6 +565,9 @@ def report(session, args, out):
 
     frames = sum(r["frames"] for r in allS)
     secs = seconds_of(allS)
+    if secs <= 0 or wmean(S or allS, "frameMs") <= 0:
+        p("The frame times in this file add up to zero: it is empty or damaged, so there is nothing to report.")
+        return 0
     p("1. THE SESSION")
     p("   %d frames over %.0f s (%.1f min), %d simulation ticks, %d slow frames (>= %s ms), %d mods enabled" % (
         frames, secs, secs / 60, sum(r["ticks"] for r in allS), len(session.slow), session.h("thresholdMs", "?"), len(session.mods)))
@@ -656,6 +661,15 @@ def report(session, args, out):
         if mods:
             p("   singleton time by mod (tick + update + late; 'game' is Timberborn):")
             for mod, (ms, kb) in sorted(mods.items(), key=lambda kv: -kv[1][0])[:args.top]:
+                p("     %-34s %8.2f ms/s  %8.1f KB/s" % (mod, ms / window_secs, kb / window_secs))
+        comp_mods = collections.defaultdict(lambda: [0.0, 0.0])
+        for t in totals.values():
+            if t.kind == "component":
+                m = comp_mods[mod_of(session, t)]
+                m[0] += t.ms; m[1] += t.kb
+        if comp_mods:
+            p("   entity component time by mod (sampled; these tick inside entMs, so do not add them to the singletons above):")
+            for mod, (ms, kb) in sorted(comp_mods.items(), key=lambda kv: -kv[1][0])[:args.top]:
                 p("     %-34s %8.2f ms/s  %8.1f KB/s" % (mod, ms / window_secs, kb / window_secs))
         p()
     watched = [t for t in totals.values() if t.kind == "method"]

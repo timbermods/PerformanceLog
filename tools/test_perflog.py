@@ -323,6 +323,23 @@ class RobustnessTests(unittest.TestCase):
         code, text = run("list", os.path.join(self.tmp, "absent"))
         self.assertEqual(1, code)
 
+    def test_frame_times_of_zero_do_not_crash(self):
+        # Found by fuzzing: a damaged file whose frame times are all 0 divided by zero.
+        s = Synthetic()
+        try:
+            for _ in range(5):
+                s.window(frame_ms=0.0001, mainCpuMs=3.0)
+            s.rows[0]["frameMs"] = 0.0
+            for r in s.rows:
+                r["frameMs"] = 0.0
+            code, text = run("report", s.write(), "--warmup", "0")
+            self.assertEqual(0, code)
+            self.assertIn("add up to zero", text)
+            code, text = run("compare", s.dir, s.dir, "--warmup", "0")
+            self.assertEqual(0, code)
+        finally:
+            s.cleanup()
+
     def test_no_command_prints_help(self):
         code, text = run()
         self.assertEqual(2, code)
@@ -423,6 +440,18 @@ class FindingTests(unittest.TestCase):
         self.assertIn("Per-frame singleton updates take", text)
         self.assertIn("Slow.Mod.Panel", text)
         self.assertIn("kyler.slowmod", text)
+
+    def test_component_time_is_rolled_up_by_mod(self):
+        s = Synthetic(mods=[("Harmony", "Harmony", "v"), ("kyler.walkers", "Walkers", "v1")])
+        for w in range(1, 9):
+            s.window(frame_ms=20.0, speed=3, entMs=6.0, ticks=100)
+            for i, (name, mod, ms) in enumerate((("Walkers.SlowWalker", "kyler.walkers", 900.0), ("Timberborn.Walking.Walker", "game", 300.0))):
+                s.profile.append({"kind": "component", "window": w, "tick": s.tick, "id": i, "calls": 5000, "sampled": 300, "ms": ms, "allocKB": 5,
+                                  "maxMs": 0.2, "name": name, "assembly": "A", "mod": mod})
+        text = self.report(s)
+        self.assertIn("entity component time by mod", text)
+        line = [l for l in text.splitlines() if l.strip().startswith("kyler.walkers")][-1]
+        self.assertIn("ms/s", line)
 
     def test_simulation_bound(self):
         s = Synthetic()

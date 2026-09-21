@@ -289,6 +289,15 @@ namespace PerformanceLog
                 foreach (var m in mods) t.Append("| ").Append(m.Mod).Append(" | ").Append(F(m.Ms / seconds, 2)).Append(" | ").Append(F(m.Kb / seconds, 1)).Append(" |\n");
                 t.Append('\n');
             }
+            var componentMods = s.Totals.Where(x => x.Kind == ProfileKind.Component)
+                .GroupBy(x => string.IsNullOrEmpty(x.Mod) ? "(unknown)" : x.Mod).Select(g => new { Mod = g.Key, Ms = g.Sum(x => x.Ms), Kb = g.Sum(x => x.Kb) })
+                .OrderByDescending(g => g.Ms).Take(12).ToList();
+            if (componentMods.Count > 0)
+            {
+                t.Append("**Entity component time by mod** (sampled, Profile = deep; these tick inside `entMs`, so do not add them to the singleton table above)\n\n| Mod | ms/s | KB/s |\n|---|---|---|\n");
+                foreach (var m in componentMods) t.Append("| ").Append(m.Mod).Append(" | ").Append(F(m.Ms / seconds, 2)).Append(" | ").Append(F(m.Kb / seconds, 1)).Append(" |\n");
+                t.Append('\n');
+            }
             var loads = s.Totals.Where(x => x.Kind >= ProfileKind.Load).OrderByDescending(x => x.Ms).Take(10).ToList();
             if (loads.Count > 0)
             {

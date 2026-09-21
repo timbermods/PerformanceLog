@@ -13,6 +13,7 @@ namespace PerformanceLog.Tests
             yield return ("Summary: a session with no frames says so instead of failing", NoFrames);
             yield return ("Summary: every section is there for a session with data, and names the mods and singletons", FullSummary);
             yield return ("Summary: a session with no profile and no slow frames still renders", NothingSlow);
+            yield return ("Summary: component time is rolled up by mod, and load steps are listed slowest first", ComponentAndLoadTables);
             yield return ("Summary: long class names are shortened and short ones kept", ShortNames);
             yield return ("Readme: placeholders are filled and no placeholder is left", ReadmePlaceholders);
         }
@@ -76,6 +77,27 @@ namespace PerformanceLog.Tests
                 Check(text.Contains("No frame reached the slow-frame threshold."));
                 Check(text.Contains("The profile is empty"));
                 Check(text.Contains("No simulation tick ran"));
+                Check(!text.Contains("NaN"));
+            }
+            finally { rig.Dispose(); }
+        }
+
+        static void ComponentAndLoadTables()
+        {
+            var rig = new Rig(thresholdMs: 1000);
+            try
+            {
+                for (int i = 0; i < 5; i++) { rig.Advance(16); rig.Frame(); }
+                var input = new SummaryInput { SessionId = "deep", Row = Probe.SessionRow(), Stats = Probe.Stats, Seconds = 10, Ticks = 100 };
+                input.Totals.Add(new Profile.Total { Id = 0, Kind = ProfileKind.Component, Name = "Walkers.SlowWalker", Mod = "kyler.walkers", Ms = 900, Kb = 10, Calls = 5000, MaxMs = 0.4 });
+                input.Totals.Add(new Profile.Total { Id = 1, Kind = ProfileKind.Component, Name = "Timberborn.Walking.Walker", Mod = "game", Ms = 300, Kb = 5, Calls = 5000, MaxMs = 0.2 });
+                input.Totals.Add(new Profile.Total { Id = 2, Kind = ProfileKind.Load, Name = "Some.Loader", Mod = "kyler.slow", Ms = 1800, Calls = 1, MaxMs = 1800 });
+                input.Totals.Add(new Profile.Total { Id = 3, Kind = ProfileKind.PostLoad, Name = "Other.Loader", Mod = "game", Ms = 40, Calls = 1, MaxMs = 40 });
+                string text = Summary.Render(input);
+                Check(text.Contains("**Entity component time by mod**"), "the component roll-up is there");
+                Check(text.IndexOf("kyler.walkers | 90.00") > 0 || text.Contains("| kyler.walkers | 90"), "and adds the mod's components: " + text);
+                Check(text.Contains("Slowest steps of loading the game"));
+                Check(text.IndexOf("Some.Loader") < text.IndexOf("Other.Loader"), "the slowest load step comes first");
                 Check(!text.Contains("NaN"));
             }
             finally { rig.Dispose(); }
