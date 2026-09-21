@@ -24,7 +24,7 @@ namespace PerformanceLog
                 double seconds = (Stopwatch.GetTimestamp() - origin) / (double)Stopwatch.Frequency;
                 string line = "# milestone|" + Clean(name) + "|" + DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) + "|" +
                     (GC.GetTotalMemory(false) / 1048576.0).ToString("F0", CultureInfo.InvariantCulture) + "|" +
-                    (Environment.WorkingSet / 1048576.0).ToString("F0", CultureInfo.InvariantCulture) + "|" +
+                    (ProcessMemory.WorkingSetBytes() / 1048576.0).ToString("F0", CultureInfo.InvariantCulture) + "|" +
                     seconds.ToString("F1", CultureInfo.InvariantCulture);
                 lock (gate)
                 {

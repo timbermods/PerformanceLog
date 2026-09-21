@@ -43,7 +43,7 @@ namespace PerformanceLog
             new Column { Name = "calls", Kind = ColumnKind.Int, Aggregate = Aggregate.Sum, Unit = "count", Description = "Calls in the window. Exact for singletons and watched methods, estimated (samples times the interval) for entities and components." },
             new Column { Name = "sampled", Kind = ColumnKind.Int, Aggregate = Aggregate.Sum, Unit = "count", Description = "Calls that were actually timed. ms and allocKB are scaled up from these, so a small number means a rough estimate." },
             new Column { Name = "ms", Kind = ColumnKind.Fixed2, Aggregate = Aggregate.Sum, Unit = "ms", Description = "Time spent in all the calls in the window (scaled up from the sampled ones), including everything inside them." },
-            new Column { Name = "allocKB", Kind = ColumnKind.Fixed1, Aggregate = Aggregate.Sum, Unit = "KB", Description = "Managed memory allocated by all the calls in the window (scaled up). Coarse when the allocation source is the heap size." },
+            new Column { Name = "allocKB", Kind = ColumnKind.Fixed1, Aggregate = Aggregate.Sum, Unit = "KB", Description = "Managed memory allocated by all the calls in the window (scaled up). Coarse when the allocation source is the heap size. For load steps (window 0) it is how much the managed heap grew during the step; a collection in the middle makes it read low." },
             new Column { Name = "maxMs", Kind = ColumnKind.Fixed2, Aggregate = Aggregate.Max, Unit = "ms", Description = "The slowest timed call in the window. A large value with a small ms is a rare hitch." },
             new Column { Name = "name", Kind = ColumnKind.Tail, Aggregate = Aggregate.Last, Unit = "", Description = "The singleton's or component's class, the entity's prefab name, or the method. Written after the numbers." },
             new Column { Name = "assembly", Kind = ColumnKind.Tail, Aggregate = Aggregate.Last, Unit = "", Description = "The DLL the class lives in." },
@@ -128,7 +128,15 @@ namespace PerformanceLog
 
         public static int Count { get { lock (gate) return entries.Count; } }
 
-        static string DefaultModOf(string assembly)
+        /// <summary>
+        /// The resolver the game side installs: the mod whose folder holds the assembly, else "game" for the game's own assemblies, else unknown.
+        /// (The first recording labelled every game singleton "(unknown)" because the mod map alone was installed.)
+        /// </summary>
+        public static Func<string, string> ResolverFor(IReadOnlyDictionary<string, string> owners) =>
+            assembly => owners.TryGetValue(assembly ?? "", out string mod) ? mod : DefaultModOf(assembly);
+
+        /// <summary>"game" for the game's own assemblies, otherwise empty (unknown).</summary>
+        internal static string DefaultModOf(string assembly)
         {
             if (string.IsNullOrEmpty(assembly)) return "";
             if (assembly.StartsWith("Timberborn.", StringComparison.Ordinal) || assembly.StartsWith("Bindito.", StringComparison.Ordinal) ||
@@ -361,15 +369,16 @@ namespace PerformanceLog
         // ---- load steps ----
 
         /// <summary>Writes one row for a step of the game's loading (window 0) straight into the profile file.</summary>
-        public static void WriteLoadRow(ProfileKind kind, string name, string assembly, long elapsedTicks, int tick, Ring target)
+        public static void WriteLoadRow(ProfileKind kind, string name, string assembly, long elapsedTicks, int tick, Ring target, long allocBytes = 0)
         {
             int id = IdFor(kind, name, assembly);
             double ms = elapsedTicks * 1000.0 / Stopwatch.Frequency;
+            double kb = Math.Max(0, allocBytes) / 1024.0;
             Array.Clear(row, 0, row.Length);
             row[0] = (int)kind; row[1] = 0; row[2] = tick; row[3] = id;
-            row[4] = 1; row[5] = 1; row[6] = ms; row[8] = ms;
+            row[4] = 1; row[5] = 1; row[6] = ms; row[7] = kb; row[8] = ms;
             target?.TryPush(row);
-            totalMs[id] += ms; totalCalls[id] += 1; if (ms > totalMax[id]) totalMax[id] = ms;
+            totalMs[id] += ms; totalKb[id] += kb; totalCalls[id] += 1; if (ms > totalMax[id]) totalMax[id] = ms;
         }
 
         // ---- frames ----

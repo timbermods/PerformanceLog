@@ -1,6 +1,31 @@
 # Changelog
 
-## 0.1.0 (preview, not yet run in a game)
+## 0.1.1 (preview)
+
+Fixes for what the first recording from a real game showed (Timberborn 1.1.2.4, Unity 6000.5.5f1, nine mods, 31 minutes, a normal exit). Everything below was found by reading
+that recording. Each one that can be checked outside the game has a check that fails without the fix (the Unity draw-call counters, the patch cost measurement and the allocation note need the game).
+
+- **The mod swapped its timing wrappers into the game's singleton arrays about four times every frame** (488601 swaps in 122150 frames). The game keeps two singleton services alive
+  (the application's and the game's) and they alternate each frame, and the mod remembered only one. The cost was made before the timed parts, so it sat in `otherMs` and `otherKB` (the recording's `otherKB` is about
+  29 KB per frame, most of it probably this), and 0.1.0's `overheadUs` did not include it. Now each service is wrapped once (`Instrumentation.FirstTime`). **In 0.1.0 recordings, distrust the allocation
+  figures and the garbage-collection section**; `tools/perflog.py` says so.
+- **Files are no longer held open.** 0.1.0 kept `frames.csv`, `profile.csv`, `spikes.csv` and `events.csv` open for writing, so zipping or copying the folder while the game ran silently left them
+  out (and a folder listing showed size 0). They are now opened, appended to and closed on each write, shared with readers, and retried if someone else holds them.
+- **Every singleton of the game itself was labelled with no mod ("(unknown)")**; the mod map was installed without the game's own assemblies. They are now `game`. The analysis tool applies the same
+  rule to older recordings.
+- **`workingMB` was always 0** (Unity's Mono reports 0 for the process's memory). It now asks Windows, and the header says where the figure comes from (`# capability|workingSet|...`).
+- **Loading steps now record how much the managed heap grew** during each one (`allocKB` of the load rows, "heap grew MB" in `summary.md`, and a finding in the report). The first recording's
+  heap went from 54 MB to 1717 MB while loading; nothing said which steps did it.
+- **`# capability-final|patchCalls|SingletonLifecycleService.LoadAll|0|never ran` was wrong**: it ran, and the counter was cleared when the session started in the middle of the load.
+- **Draw calls**: Unity 6 has no counter called `Draw Calls Count` (or `Batches Count`, or `GC Allocated In Frame`; checked against the strings in this game's `UnityPlayer.dll`). `prDraw` is now the sum of
+  Unity 6's `Standard`, `Standard Instanced`, `SRP Batcher`, `Standard Indirect`, `BRG` and `Null Geometry` draw call counters, and the header names the ones it found.
+- The allocation source line now says why the exact counter was not used. `GC.GetAllocatedBytesForCurrentThread` is present in this game's `mscorlib.dll` and Mono runtime, but 0.1.0's probe
+  rejected it without saying why, so allocation was the size of the managed heap; the next recording says why.
+- The cost of a Harmony patch is now measured after warming up and as the best of several rounds. 0.1.0's figure read 0 (most likely the unwarmed baseline included compiling the method), which left
+  `overheadUs` using a default of 40 ns per patch call.
+- The report tells you about known defects of the version that made the recording (`KNOWN ISSUE` lines), and no longer reports the false "LoadAll never ran" for 0.1.0.
+
+## 0.1.0 (preview)
 
 First release. A standalone mod that records where a Timberborn session's time and memory go, built from the frame rate log of the BeaverBuddies Stability Fork
 (`1.0.10-perflog-preview2`), rebuilt to hook the game itself.

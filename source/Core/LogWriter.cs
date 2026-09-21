@@ -10,26 +10,38 @@ namespace PerformanceLog
     /// <summary>A queue of text lines that the writer thread appends to a file. Callable from any thread.</summary>
     public sealed class TextChannel
     {
+        /// <summary>More lines than this waiting means the file is not being written; the rest are dropped so the queue cannot grow without bound.</summary>
+        const int MaxQueued = 20000;
+
         internal readonly ConcurrentQueue<string> Queue = new ConcurrentQueue<string>();
         internal readonly string Path;
         internal readonly string Header;
-        internal StreamWriter Stream;
+        internal volatile bool Failed;
+        internal int OpenFailures;
 
         internal TextChannel(string path, string header) { Path = path; Header = header; }
 
-        public void Write(string line) => Queue.Enqueue(line);
+        public void Write(string line)
+        {
+            if (Failed || Queue.Count >= MaxQueued) return;
+            Queue.Enqueue(line);
+        }
     }
 
     /// <summary>
     /// Writes every output file of a session on one thread of its own, twice a second, so no disk work ever happens on the frame being
-    /// measured. Table rows come from rings allocated once and are formatted into buffers allocated once. If a file cannot be opened or
-    /// written that file is given up quietly and the game carries on; the reason is kept in <see cref="Failure"/>.
+    /// measured. Table rows come from rings allocated once and are formatted into buffers allocated once. A file is opened only for the
+    /// moment something is appended to it and shared with readers, so the folder can be copied or zipped while the game runs (a file held
+    /// open for writing cannot be, and shows a size of 0 in a folder listing until it is closed). If a file cannot be opened for a while or
+    /// cannot be written, that file is given up quietly and the game carries on; the reason is kept in <see cref="Failure"/>.
     /// </summary>
     public sealed class LogWriter
     {
         public const int DrainMilliseconds = 500;
         const int BatchRows = 128;
         const int LineChars = 4096;
+        /// <summary>A file someone else holds open without sharing is retried at each drain for this many drains (a minute) before it is given up.</summary>
+        const int MaxOpenFailures = 120;
 
         sealed class TableOutput
         {
@@ -39,9 +51,9 @@ namespace PerformanceLog
             public Ring Ring;
             public TailWriter Tail;
             public Action<TextWriter> Trailer;
-            public StreamWriter Stream;
             public long DroppedReported;
             public bool Failed;
+            public int OpenFailures;
         }
 
         sealed class FileOutput
@@ -103,7 +115,7 @@ namespace PerformanceLog
                 if (f.Path == path) { f.Pending = null; f.PendingProducer = producer; return; }
         }
 
-        /// <summary>Opens the files and starts writing. False, with <see cref="Failure"/> set, if none could be opened.</summary>
+        /// <summary>Creates the files and starts writing. False, with <see cref="Failure"/> set, if none could be created.</summary>
         public bool Start()
         {
             int opened = 0;
@@ -111,10 +123,11 @@ namespace PerformanceLog
             {
                 try
                 {
-                    t.Stream = Open(t.Path);
-                    foreach (string line in t.Header) t.Stream.WriteLine(line);
-                    t.Stream.WriteLine(t.Table.HeaderLine());
-                    t.Stream.Flush();
+                    using (StreamWriter w = OpenWriter(t.Path, FileMode.Create))
+                    {
+                        foreach (string line in t.Header) w.WriteLine(line);
+                        w.WriteLine(t.Table.HeaderLine());
+                    }
                     opened++;
                 }
                 catch (Exception e) { Fail(t, e); }
@@ -123,12 +136,10 @@ namespace PerformanceLog
             {
                 try
                 {
-                    c.Stream = Open(c.Path);
-                    c.Stream.WriteLine(c.Header);
-                    c.Stream.Flush();
+                    using (StreamWriter w = OpenWriter(c.Path, FileMode.Create)) w.WriteLine(c.Header);
                     opened++;
                 }
-                catch (Exception e) { Failure = Failure ?? (c.Path + ": " + e.Message); }
+                catch (Exception e) { GiveUp(c, e); }
             }
             if (opened == 0) return false;
             thread = new Thread(Run) { IsBackground = true, Name = "PerformanceLog writer" };
@@ -136,18 +147,24 @@ namespace PerformanceLog
             return true;
         }
 
-        static StreamWriter Open(string path)
+        /// <summary>Opens a file for writing, letting other programs read, write and delete it meanwhile.</summary>
+        static StreamWriter OpenWriter(string path, FileMode mode)
         {
-            var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
-            return new StreamWriter(stream, new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = false };
+            var stream = new FileStream(path, mode, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 4096);
+            return new StreamWriter(stream, new UTF8Encoding(false), 4096) { NewLine = "\n", AutoFlush = false };
         }
 
         void Fail(TableOutput t, Exception e)
         {
             t.Failed = true;
             Failure = Failure ?? (Path.GetFileName(t.Path) + ": " + e.Message);
-            try { t.Stream?.Dispose(); } catch { }
-            t.Stream = null;
+        }
+
+        void GiveUp(TextChannel c, Exception e)
+        {
+            c.Failed = true;
+            Failure = Failure ?? (Path.GetFileName(c.Path) + ": " + e.Message);
+            while (c.Queue.TryDequeue(out _)) { }
         }
 
         /// <summary>Writes what is left, closes the files and waits (briefly) for the writer thread to finish.</summary>
@@ -193,7 +210,7 @@ namespace PerformanceLog
         {
             foreach (TableOutput t in tables)
             {
-                if (t.Failed || t.Stream == null) continue;
+                if (t.Failed) continue;
                 try { DrainTable(t, batch, line, tail); }
                 catch (Exception e)
                 {
@@ -203,18 +220,21 @@ namespace PerformanceLog
             }
             foreach (TextChannel c in channels)
             {
-                if (c.Stream == null) continue;
-                try
-                {
-                    while (c.Queue.TryDequeue(out string text)) c.Stream.WriteLine(text);
-                    c.Stream.Flush();
-                }
+                if (c.Failed || c.Queue.IsEmpty) continue;
+                StreamWriter w;
+                try { w = OpenWriter(c.Path, FileMode.Append); }
                 catch (Exception e)
                 {
-                    Failure = Failure ?? (Path.GetFileName(c.Path) + ": " + e.Message);
-                    try { c.Stream.Dispose(); } catch { }
-                    c.Stream = null;
+                    if (++c.OpenFailures >= MaxOpenFailures) GiveUp(c, e);
+                    continue;
                 }
+                c.OpenFailures = 0;
+                try
+                {
+                    using (w)
+                        while (c.Queue.TryDequeue(out string text)) w.WriteLine(text);
+                }
+                catch (Exception e) { GiveUp(c, e); }
             }
             foreach (FileOutput f in files)
             {
@@ -239,57 +259,73 @@ namespace PerformanceLog
             }
         }
 
-        static void DrainTable(TableOutput t, double[] batch, char[] line, StringBuilder tail)
+        void DrainTable(TableOutput t, double[] batch, char[] line, StringBuilder tail)
         {
-            int columns = t.Table.Count;
-            int n;
-            do
+            // Nothing to write: do not touch the file at all. If it cannot be opened the rows stay in the ring (which drops new ones, counted,
+            // rather than growing) and the next drain tries again.
+            if (t.Ring.Count == 0 && t.Ring.Dropped == t.DroppedReported) return;
+            StreamWriter w;
+            try { w = OpenWriter(t.Path, FileMode.Append); }
+            catch (Exception e)
             {
-                n = t.Ring.Drain(batch, BatchRows);
-                for (int i = 0; i < n; i++)
-                {
-                    var row = new ReadOnlySpan<double>(batch, i * columns, columns);
-                    if (!t.Table.TryFormatRow(row, line, out int written)) continue;
-                    t.Stream.Write(line, 0, written);
-                    if (t.Tail != null)
-                    {
-                        tail.Clear();
-                        t.Tail(row, tail);
-                        t.Stream.Write(tail.ToString());
-                    }
-                    t.Stream.Write('\n');
-                }
-            } while (n == BatchRows);
-            long dropped = t.Ring.Dropped;
-            if (dropped != t.DroppedReported)
-            {
-                t.DroppedReported = dropped;
-                t.Stream.WriteLine("# rows dropped so far because the writer fell behind: " + dropped);
+                if (++t.OpenFailures >= MaxOpenFailures) throw new IOException("could not be opened for a minute: " + e.Message);
+                return;
             }
-            t.Stream.Flush();
+            t.OpenFailures = 0;
+            using (w)
+            {
+                int columns = t.Table.Count;
+                int n;
+                do
+                {
+                    n = t.Ring.Drain(batch, BatchRows);
+                    for (int i = 0; i < n; i++)
+                    {
+                        var row = new ReadOnlySpan<double>(batch, i * columns, columns);
+                        if (!t.Table.TryFormatRow(row, line, out int written)) continue;
+                        w.Write(line, 0, written);
+                        if (t.Tail != null)
+                        {
+                            tail.Clear();
+                            t.Tail(row, tail);
+                            w.Write(tail.ToString());
+                        }
+                        w.Write('\n');
+                    }
+                } while (n == BatchRows);
+                long dropped = t.Ring.Dropped;
+                if (dropped != t.DroppedReported)
+                {
+                    t.DroppedReported = dropped;
+                    w.WriteLine("# rows dropped so far because the writer fell behind: " + dropped);
+                }
+            }
         }
 
         void CloseAll()
         {
             foreach (TableOutput t in tables)
             {
-                try
+                if (t.Failed) continue;
+                // The end of the file: what only the end knows, then a line that says the file is complete. A reader may hold the file for a
+                // moment, so this tries a few times.
+                for (int attempt = 0; attempt < 10; attempt++)
                 {
-                    if (t.Stream != null && !t.Failed)
+                    try
                     {
-                        t.Trailer?.Invoke(t.Stream);
-                        t.Stream.WriteLine("# end");
-                        t.Stream.Flush();
+                        using (StreamWriter w = OpenWriter(t.Path, FileMode.Append))
+                        {
+                            t.Trailer?.Invoke(w);
+                            w.WriteLine("# end");
+                        }
+                        break;
+                    }
+                    catch (Exception e)
+                    {
+                        if (attempt == 9) Failure = Failure ?? (Path.GetFileName(t.Path) + ": " + e.Message);
+                        else Thread.Sleep(50);
                     }
                 }
-                catch (Exception e) { Failure = Failure ?? e.Message; }
-                try { t.Stream?.Dispose(); } catch { }
-                t.Stream = null;
-            }
-            foreach (TextChannel c in channels)
-            {
-                try { c.Stream?.Dispose(); } catch { }
-                c.Stream = null;
             }
         }
     }

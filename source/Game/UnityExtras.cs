@@ -13,11 +13,14 @@ namespace PerformanceLog
     /// </summary>
     internal static class UnityExtras
     {
+        /// <summary>One per-frame column fed from Unity's profiler: usually one counter, but a build that renamed it can feed it from several that are added up.</summary>
         struct Counter
         {
             public string Name;
-            public ProfilerRecorder Recorder;
+            public ProfilerRecorder[] Recorders;
+            public string[] Started;
             public long Largest;
+            public bool Valid => Recorders != null && Recorders.Length > 0;
         }
 
         static readonly List<Counter> counters = new List<Counter>();
@@ -29,25 +32,55 @@ namespace PerformanceLog
         internal static Func<double[]> ColonySampler;
 
         // The order is the order of the per-frame extra columns: prGcBytes, prGcCount, prDraw, prSetPass, prBatches, prTris.
-        static readonly (ProfilerCategory Category, string Name)[] wanted =
+        // Name is the counter Unity documents. If a build does not have it, the Instead counters are started and added up; they are the names
+        // Unity 6 gives the pieces of the old ones (checked against the strings in this game's UnityPlayer.dll). "GC Allocated In Frame" and
+        // "Batches Count" are simply not in that player, so those columns stay 0 and the header says so.
+        static readonly (ProfilerCategory Category, string Name, string[] Instead)[] wanted =
         {
-            (ProfilerCategory.Memory, "GC Allocated In Frame"),
-            (ProfilerCategory.Memory, "GC Allocation In Frame Count"),
-            (ProfilerCategory.Render, "Draw Calls Count"),
-            (ProfilerCategory.Render, "SetPass Calls Count"),
-            (ProfilerCategory.Render, "Batches Count"),
-            (ProfilerCategory.Render, "Triangles Count"),
+            (ProfilerCategory.Memory, "GC Allocated In Frame", new string[0]),
+            (ProfilerCategory.Memory, "GC Allocation In Frame Count", new string[0]),
+            (ProfilerCategory.Render, "Draw Calls Count", new[]
+            {
+                "Standard Draw Calls Count", "Standard Instanced Draw Calls Count", "SRP Batcher Draw Calls Count", "Standard Indirect Draw Calls Count",
+                "BRG Draw Calls Count", "BRG Indirect Draw Calls Count", "Null Geometry Draw Calls Count", "Null Geometry Indirect Draw Calls Count",
+            }),
+            (ProfilerCategory.Render, "SetPass Calls Count", new string[0]),
+            (ProfilerCategory.Render, "Batches Count", new string[0]),
+            (ProfilerCategory.Render, "Triangles Count", new string[0]),
         };
+
+        static bool TryStart(ProfilerCategory category, string name, out ProfilerRecorder recorder)
+        {
+            recorder = default;
+            try
+            {
+                recorder = ProfilerRecorder.StartNew(category, name);
+                return recorder.Valid;
+            }
+            catch (Exception) { return false; }
+        }
 
         internal static void Start()
         {
             Stop();
             frames = 0;
-            foreach (var (category, name) in wanted)
+            foreach (var (category, name, instead) in wanted)
             {
                 var counter = new Counter { Name = name };
-                try { counter.Recorder = ProfilerRecorder.StartNew(category, name); }
-                catch (Exception) { }
+                var recorders = new List<ProfilerRecorder>();
+                var started = new List<string>();
+                if (TryStart(category, name, out ProfilerRecorder recorder)) { recorders.Add(recorder); started.Add(name); }
+                else
+                {
+                    DisposeQuietly(recorder);
+                    foreach (string other in instead)
+                    {
+                        if (TryStart(category, other, out ProfilerRecorder piece)) { recorders.Add(piece); started.Add(other); }
+                        else DisposeQuietly(piece);
+                    }
+                }
+                counter.Recorders = recorders.ToArray();
+                counter.Started = started.ToArray();
                 counters.Add(counter);
             }
             try { frameTimingOn = FrameTimingManager.IsFeatureEnabled(); }
@@ -56,12 +89,16 @@ namespace PerformanceLog
             Probe.HeavySampler = Heavy;
         }
 
+        static void DisposeQuietly(ProfilerRecorder recorder)
+        {
+            try { if (recorder.Valid) recorder.Dispose(); } catch (Exception) { }
+        }
+
         internal static void Stop()
         {
             foreach (Counter counter in counters)
-            {
-                try { if (counter.Recorder.Valid) counter.Recorder.Dispose(); } catch (Exception) { }
-            }
+                if (counter.Recorders != null)
+                    foreach (ProfilerRecorder recorder in counter.Recorders) DisposeQuietly(recorder);
             counters.Clear();
             Probe.HeavySampler = null;
         }
@@ -76,8 +113,10 @@ namespace PerformanceLog
                 for (int i = 0; i < counters.Count; i++)
                 {
                     Counter counter = counters[i];
-                    if (!counter.Recorder.Valid) { extra[i] = 0; continue; }
-                    long value = counter.Recorder.LastValue;
+                    ProfilerRecorder[] recorders = counter.Recorders;
+                    if (recorders.Length == 0) { extra[i] = 0; continue; }
+                    long value = 0;
+                    for (int r = 0; r < recorders.Length; r++) value += recorders[r].LastValue;
                     extra[i] = value;
                     if (value > counter.Largest) { counter.Largest = value; counters[i] = counter; }
                 }
@@ -107,7 +146,7 @@ namespace PerformanceLog
                 extra[at] = Profiler.GetMonoHeapSizeLong() / 1048576.0;
                 extra[at + 1] = Profiler.GetMonoUsedSizeLong() / 1048576.0;
                 extra[at + 2] = Profiler.GetTotalAllocatedMemoryLong() / 1048576.0;
-                extra[at + 3] = Environment.WorkingSet / 1048576.0;
+                extra[at + 3] = ProcessMemory.WorkingSetBytes() / 1048576.0;
             }
             catch (Exception) { }
             try
@@ -126,8 +165,15 @@ namespace PerformanceLog
                 "# capability|frameTiming|" + (frameTimingOn ? "enabled" : "off (the game's player settings leave Unity's frame timing off, or it is unavailable)"),
             };
             foreach (Counter counter in counters)
-                lines.Add("# capability|profilerRecorder|" + counter.Name + "|" + (counter.Recorder.Valid ? "started" : "not available"));
+                lines.Add("# capability|profilerRecorder|" + counter.Name + "|" + Describe(counter));
             return lines;
+        }
+
+        static string Describe(Counter counter)
+        {
+            if (!counter.Valid) return "not available";
+            if (counter.Started.Length == 1 && counter.Started[0] == counter.Name) return "started";
+            return "started, as the sum of " + string.Join(" + ", counter.Started);
         }
 
         /// <summary>Says which sources actually produced a value, for the end of the file. Read on the game thread, before the log stops.</summary>

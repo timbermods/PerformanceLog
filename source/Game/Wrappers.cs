@@ -115,9 +115,9 @@ namespace PerformanceLog
         public void Load()
         {
             if (!LoadRecorder.Active) { inner.Load(); return; }
-            long start = Stopwatch.GetTimestamp();
+            long start = Stopwatch.GetTimestamp(), heap = LoadRecorder.Heap();
             try { inner.Load(); }
-            finally { LoadRecorder.Add(ProfileKind.Load, inner.GetType(), Stopwatch.GetTimestamp() - start); }
+            finally { LoadRecorder.Add(ProfileKind.Load, inner.GetType(), Stopwatch.GetTimestamp() - start, LoadRecorder.Heap() - heap); }
         }
     }
 
@@ -129,9 +129,9 @@ namespace PerformanceLog
         public void LoadNonSingletons()
         {
             if (!LoadRecorder.Active) { inner.LoadNonSingletons(); return; }
-            long start = Stopwatch.GetTimestamp();
+            long start = Stopwatch.GetTimestamp(), heap = LoadRecorder.Heap();
             try { inner.LoadNonSingletons(); }
-            finally { LoadRecorder.Add(ProfileKind.LoadNonSingleton, inner.GetType(), Stopwatch.GetTimestamp() - start); }
+            finally { LoadRecorder.Add(ProfileKind.LoadNonSingleton, inner.GetType(), Stopwatch.GetTimestamp() - start, LoadRecorder.Heap() - heap); }
         }
     }
 
@@ -143,9 +143,9 @@ namespace PerformanceLog
         public void PostLoad()
         {
             if (!LoadRecorder.Active) { inner.PostLoad(); return; }
-            long start = Stopwatch.GetTimestamp();
+            long start = Stopwatch.GetTimestamp(), heap = LoadRecorder.Heap();
             try { inner.PostLoad(); }
-            finally { LoadRecorder.Add(ProfileKind.PostLoad, inner.GetType(), Stopwatch.GetTimestamp() - start); }
+            finally { LoadRecorder.Add(ProfileKind.PostLoad, inner.GetType(), Stopwatch.GetTimestamp() - start, LoadRecorder.Heap() - heap); }
         }
     }
 
@@ -157,9 +157,9 @@ namespace PerformanceLog
         public void PostLoadNonSingletons()
         {
             if (!LoadRecorder.Active) { inner.PostLoadNonSingletons(); return; }
-            long start = Stopwatch.GetTimestamp();
+            long start = Stopwatch.GetTimestamp(), heap = LoadRecorder.Heap();
             try { inner.PostLoadNonSingletons(); }
-            finally { LoadRecorder.Add(ProfileKind.PostLoadNonSingleton, inner.GetType(), Stopwatch.GetTimestamp() - start); }
+            finally { LoadRecorder.Add(ProfileKind.PostLoadNonSingleton, inner.GetType(), Stopwatch.GetTimestamp() - start, LoadRecorder.Heap() - heap); }
         }
     }
 
@@ -223,6 +223,8 @@ namespace PerformanceLog
             public ProfileKind Kind;
             public string Name, Assembly;
             public long Ticks;
+            /// <summary>How much the managed heap grew during the step (a collection in the middle makes it read low).</summary>
+            public long Bytes;
         }
 
         static readonly List<Step> steps = new List<Step>();
@@ -240,12 +242,19 @@ namespace PerformanceLog
             Active = true;
         }
 
-        public static void Add(ProfileKind kind, Type type, long ticks)
+        /// <summary>The managed heap's size now. Loading happens before the log has chosen an allocation source, so this reads the heap directly.</summary>
+        public static long Heap()
+        {
+            try { return GC.GetTotalMemory(false); }
+            catch (Exception) { return 0; }
+        }
+
+        public static void Add(ProfileKind kind, Type type, long ticks, long bytes = 0)
         {
             if (!Active || steps.Count > 4000) return;
             string assembly = "";
             try { assembly = type.Assembly.GetName().Name; } catch (Exception) { }
-            steps.Add(new Step { Kind = kind, Name = type.FullName ?? type.Name, Assembly = assembly, Ticks = ticks });
+            steps.Add(new Step { Kind = kind, Name = type.FullName ?? type.Name, Assembly = assembly, Ticks = ticks, Bytes = Math.Max(0, bytes) });
         }
 
         public static void PhaseEnd(string name, long ticks)

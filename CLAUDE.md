@@ -96,10 +96,19 @@ To read the game's own code (the way every patch target here was checked): `ilsp
 - Colony and memory columns are read only when a row is written and carried over otherwise (`lastHeavy` in `Probe`).
 - The tests run each check on a thread-pool thread, and `Probe` is static and remembers the game thread's id: every check that uses it goes through `Rig` in `CoreTests.cs`.
 
-## What is not verified
+## What is and is not verified
 
-Nothing has been run in the real game. See `docs/TESTING.md` for the list and the in-game checklist. If you are asked to look at a first recording, start with the `# capability` and
-`# capability-final` lines in the `frames.csv` header and the "Read first" section of `summary.md`: they say which parts worked.
+0.1.0 was run once in the real game (2026-09-20, 31 minutes, nine mods including BeaverBuddies, clean exit). Its recording is why 0.1.1 exists: see `CHANGELOG.md` and `docs/TESTING.md`
+(what that run proved, what it broke, and what is still unproven). When you are given a recording, start with the `# capability` and `# capability-final` lines in the `frames.csv`
+header and the "Read first" section of `summary.md`: they say which parts worked. `python tools/perflog.py report <folder>` prints a `KNOWN ISSUE` line for every known defect of the
+version that made it (`KNOWN_ISSUES` in `tools/perflog.py`); add to that list whenever a version is found to record something wrong.
+
+Two lessons from that run that shape how to change this code:
+- **Count what a patch really does.** `# capability-final|patchCalls|...` showed 488601 wrapper swaps in 122150 frames: the hit counters are how a defect that only exists in the game shows up.
+  Keep a counter for anything done once per game or per frame.
+- **The game keeps more than one singleton service alive** (the application's and the game's, both updated every frame), so anything remembered "per service" must hold several
+  (`Instrumentation.FirstTime`, a `ConditionalWeakTable`), never one.
+- Files are opened, appended to and closed on each write (`LogWriter`), never held open: a file held open for writing cannot be zipped or copied, and shows size 0 in a listing.
 
 ## Provenance
 

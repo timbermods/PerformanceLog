@@ -4,10 +4,10 @@ A Timberborn 1.1 mod (built against **1.1.2.4**) that measures **where the game'
 person, or an AI assistant such as Claude, can read to find out why a game is slow. It is a diagnostic tool for finding performance problems in
 the game and in other mods. It does nothing else.
 
-Version **0.1.0** is a **preview**. It has passed its automated checks against the game's real assemblies, but **it has not been run in a game
-yet**: nothing that needs the running game (Harmony applying the patches, Unity's player loop and profiler counters) has been seen working.
-If a part fails to start it says so in the log and the summary, that part stays off, and the game carries on. Read [docs/TESTING.md](docs/TESTING.md)
-for what is and is not verified, and how to check it in a game in five minutes.
+Version **0.1.1** is a **preview**. Its automated checks run against the game's real assemblies, and version 0.1.0 has been played once (a 31 minute session with
+nine mods, ending in a normal exit): every patch applied and the recording was complete. That first recording also showed several defects, fixed in 0.1.1 and
+listed in [CHANGELOG.md](CHANGELOG.md); the fixes themselves have not been played yet. If a part fails to start it says so in the log and the summary, that part stays
+off, and the game carries on. Read [docs/TESTING.md](docs/TESTING.md) for what is and is not verified, and how to check it in a game in five minutes.
 
 It only observes. It never records or replays an action, never uses the game's random numbers and never touches anything the simulation reads, so
 it should not cause a desync in co-op. (That has not been played in co-op yet.)
@@ -18,7 +18,7 @@ it should not cause a desync in co-op. (That has not been played in co-op yet.)
 2. It requires the **Harmony** mod (2.4.1 or newer) from the Steam Workshop.
 3. Launch Timberborn, enable **Performance Log** in the mod manager, and restart.
 4. Play. Leave normally (menu → exit) so the files are finished; if the game crashes the files are still readable and the summary is at most a
-   minute stale. Look for `[PerformanceLog]` lines in `Player.log`
+   minute stale. (From 0.1.1 you can also copy or zip the folder while the game runs; 0.1.0 held four of its files open, so a zip made then left them out.) Look for `[PerformanceLog]` lines in `Player.log`
    (`%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log`).
 
 Recordings go to `Documents\Timberborn\PerformanceLog\<date and time>\`, one folder per game session (a session is from a save finishing loading to leaving it).
@@ -123,7 +123,7 @@ Install the .NET 8 SDK and Python 3, and have Timberborn (and the Harmony Worksh
 .\build.ps1 -GameDir 'C:\Program Files (x86)\Steam\steamapps\common\Timberborn'
 ```
 
-builds the mod, runs the checks, and creates `dist\PerformanceLog-0.1.0.zip`. `.\build.ps1 -Install` also copies it into your `Mods` folder. The checks alone:
+builds the mod, runs the checks, and creates `dist\PerformanceLog-0.1.1.zip`. `.\build.ps1 -Install` also copies it into your `Mods` folder. The checks alone:
 
 ```
 dotnet run --project tests -c Release

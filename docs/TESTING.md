@@ -1,10 +1,10 @@
 # What has been checked, and how to check the rest in a game
 
-Version 0.1.0 has been tested without the game running. This is the honest list.
+Version 0.1.0 was run in a game once (the first recording, below); 0.1.1 fixes what that showed and has been tested without the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (82 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (40 checks).
+`dotnet run --project tests -c Release` (89 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (44 checks).
 
 | What | How |
 |---|---|
@@ -17,7 +17,9 @@ Version 0.1.0 has been tested without the game running. This is the honest list.
 | Every patch target exists in the installed game (1.1.2.4), has no exception filter, and takes only parameters Harmony can supply | `GameBindingTests.TargetsResolve` |
 | The singleton wrappers work on the game's own `SingletonLifecycleService` and `TickableSingletonService` (built by their real constructors, their real load and update loops run through the wrappers), including exceptions and double wrapping | `GameBindingTests` |
 | The entity bucket patch against the game's real `TickableEntityBucket`; the game splits a tick into 128 entity buckets | `GameBindingTests` |
-| The wrappers go in on the first tick and frame, once per service, so other mods' `Load` postfixes see the game's own singletons | `GameBindingTests.WrappingWaitsForTheFirstTick`, `WrappingIsOncePerService` |
+| The wrappers go in on the first tick and frame, once per service (also when two services alternate every frame), so other mods' `Load` postfixes see the game's own singletons | `GameBindingTests.WrappingWaitsForTheFirstTick`, `WrappingIsOncePerService`, `WrappingHandlesServicesThatAlternate` |
+| Files are not held open while the game runs (the strictest share mode can read them, a copy works), and a file someone else holds is retried without losing rows | `WriterTests.ReadableWhileRunning`, `RetriesWhenHeld` |
+| The resolver the game side installs names a mod's DLL, `game` for the game's own and leaves the rest unknown; loading steps carry the heap growth | `ProfileTests` |
 | Profile = off leaves the entity tick unpatched; an abandoned save does not block the next; the parallel tick figure is not counted twice; slow-frame rows are limited per minute; the summary is made on the writer thread | `GameBindingTests`, `CoreTests`, `WriterTests` |
 | The config file, the watch list resolution against the real game types | `GameBindingTests` |
 | The analysis tool reads what the mod writes (fixtures come from the real writer) and each finding fires on its situation and not on a healthy one | `tools/test_perflog.py`, `WriterTests.FixturesAreCurrent` |
@@ -28,26 +30,47 @@ state not reset between sessions, `Profile = off` still patching every entity ti
 
 A mutation check confirmed the game-binding tests fail when a private field name the mod relies on is changed.
 
-## Not verified: needs the running game
+## Verified in a real game: the first recording (0.1.0, 2026-09-20)
 
-1. **Harmony actually applying the patches** (the Workshop build only runs under Mono). The targets and signatures are validated; that the game accepts them is not.
-2. **Unity's player loop**: that the phase markers install, that the first phase's marker really is called once per frame before anything else, and that calling `SetPlayerLoop` during
-   scene load is harmless.
-3. **Bindito injection** of `SessionService` (six constructor parameters, all checked to be bound in the Game context, none exercised).
-4. **`ProfilerRecorder` counters and `FrameTimingManager`** in a release build: they may produce nothing (the log says so, and the columns stay 0).
-5. **Which allocation source the runtime offers** (`GC.GetAllocatedBytesForCurrentThread` may not exist under Unity's Mono; the log falls back to the heap size and says so).
-6. **Overhead**: the estimate is computed by the mod itself, not measured against a game running without it. Compare the frame rate with the mod turned off (see the checklist).
-7. **Co-op**: alongside BeaverBuddies (which replaces the tick loop). Counting ticks by entity buckets is meant to survive that; it has not been seen to.
-8. **Two small save targets may be inlined by Mono** (`GameSaver.SaveInstantlySkippingNameValidation`, `Ticker.FinishFullTick`): if so their patches never fire, and the log says `never ran`. `SaveQueued`
-   and `SaveWriter.WriteToSaveStream` cover the same saves.
-9. **`PlayerLoop.SetPlayerLoop` called while a scene loads**, and (deliberately not) at quit: the sibling mods never call it, so nothing proves it safe in this game. If the game misbehaves at load or exit with
-   this mod on, that is the first place to look; `Enabled = false` removes it.
-10. **The exact order of Harmony patches against BeaverBuddies** (this mod's scope patches use `Priority.First` / `Priority.Last`).
-11. **The mod attribution** (which DLL belongs to which mod) depends on how the game lays out mod folders.
+Timberborn 1.1.2.4, Unity 6000.5.5f1, Windows 11, Ryzen 7 9800X3D, RTX 4080 SUPER, nine mods (BeaverBuddies Stability Fork 1.1.10, Late Game Performance, MixedStorage, Persistent Work Areas,
+Optimized Local Housing, The Tipsy Tail, Mod Settings, Harmony). A 31 minute session: 122150 frames, 12821 ticks (paused for the first 12 minutes, then speed 7), a colony of 359 beavers and
+11.6 thousand entities, four saves (three autosaves and the save on exit), and a normal exit.
+
+Worked:
+- **Harmony applied all 22 patches**, none failed, and `Player.log` has no warning or exception from the mod. The mod and the game both exited cleanly (`session-end`, and `# end` in every file).
+- **Bindito injection of `SessionService`**, and the session starting in `PostLoad` and ending on unload.
+- **Unity's player loop**: eight phase markers installed and timed; calling `SetPlayerLoop` during scene load was harmless; nothing went wrong at quit.
+- **Processor times, `FrameTimingManager`, and the `SetPass Calls Count` and `Triangles Count` profiler counters** produced values.
+- **Timing every kind of singleton** (tick, update, late update, parallel start), sampled entity kinds, ticks counted right alongside BeaverBuddies (which replaces the tick loop): 1641139
+  entity-bucket calls over 12821 ticks is 128 each plus part of one more.
+- **Saves under BeaverBuddies**: the queued save reads about 0 ms and the real one is `save (writing the world)` at 221 to 231 ms (snapshot 207 to 215 ms, thumbnail 14 to 15 ms), as designed. The
+  exit save was caught by the `SaveInstantlySkippingNameValidation` patch (669 ms), so Mono did not inline it.
+- **Loading steps and the milestones**, and the summary rewritten every minute.
+- **Coexisting with Late Game Performance** (which patches the same save methods): both mods' patches were installed on the same methods without a failure; the header lists them side by side.
+
+Did not work, or was wrong (all fixed in 0.1.1, see the changelog): the wrapper swapping four times a frame, every game singleton labelled unknown, `workingMB` 0, files held open, no allocation on
+loading steps, the `LoadAll never ran` counter, and `prDraw`/`prBatches` 0.
+
+Not available in this game, and not going to be: `GC Allocated In Frame`, `GC Allocation In Frame Count` and `Batches Count` do not exist in Unity 6's player (they are not in `UnityPlayer.dll`), and
+the mod's probe rejected `GC.GetAllocatedBytesForCurrentThread` (the method is in the game's `mscorlib.dll` and Mono runtime; 0.1.0 did not record why, 0.1.1 does), so **allocation is the size of the managed
+heap and is coarse**. The per-singleton `KB/s` figures are therefore only good in aggregate.
+
+## Still not verified: needs the running game
+
+1. **The 0.1.1 fixes themselves**: that each service is wrapped once (`# capability-final|patchCalls|singleton wrappers put in place` should be a handful, not hundreds of thousands), that the four files
+   can be zipped while the game runs, that `workingMB` is non-zero, that game singletons show `game`, that loading steps show a heap growth, and that `prDraw` is non-zero.
+2. **Overhead** measured against a game running without the mod. The mod's own estimate (0.1.0: 0.3% of a frame paused, 0.8% at speed 7) left out the wrapper swapping and used a default cost for a
+   patch; 0.1.1 measures the patch cost, but nobody has compared the frame rate with the mod off. See the checklist.
+3. **Co-op**: with BeaverBuddies actually connected to another player. It has only been seen running with BeaverBuddies loaded in a single-player game.
+4. **`Ticker.FinishFullTick`** (one of the four save-stage patches) is counted inside `save stages`, so it has not been seen separately; the stages of three saves were recorded.
+5. **The mod attribution** (which DLL belongs to which mod) worked for the mods in the first recording (`beaverbuddies`, `Kyler.OptimizedLocalHousing`, `eMka.ModSettings`, `kyler.persistentworkareas`);
+   a mod whose DLL is not in its own folder may still read as unknown.
+6. **The report's advice on a bad recording.** The first recording was mostly paused and in the background, so the findings for real problems (a slow simulation, a saving hitch, a memory leak,
+   a mod that costs too much) have been exercised on made-up sessions and one real, healthy one.
 
 ## Five-minute check in a game
 
-1. Install (README), enable, start a game from a save, play **3 minutes**, including a while at speed 3, then leave through the menu.
+1. Install (README), enable, start a game from a save, play **3 minutes with the game in front**, including a while at speed 3, then leave through the menu.
 2. Open `Documents\Timberborn\PerformanceLog\<newest folder>`. There should be `summary.md`, `frames.csv`, `profile.csv`, `spikes.csv`, `events.csv`, `README.md` and `columns.md`.
 3. In `Player.log`, search for `[PerformanceLog]`. Expect `Patches: N installed, 0 could not be made.` and `Recording to ...` and `Finished: ...`. Any warning names the part that is off.
 4. Open `summary.md`. The **"Read first"** list at the top (if any) says what did not work. Then check:
@@ -56,6 +79,7 @@ A mutation check confirmed the game-binding tests fail when a private field name
    - **Where the time goes** lists singletons with their mods (the game's own show as `game`; a mod you have enabled should show under its id).
    - The **mod list** matches what you enabled.
 5. In the `frames.csv` header: every `# capability|patch|...` line says `installed`; the `# capability-final|patchCalls|...` lines at the end say non-zero counts, and none says `never ran`.
+   `singleton wrappers put in place` should be a handful (one or two per array). `# capability|workingSet|...` should say `from Windows`.
    `# capability-final|profilerRecorder|...` and `frameTiming` may legitimately say `never produced a value` in a release build.
 6. Compare the frame rate the game shows with `summary.md`'s mean; they should agree.
 7. Run `python tools/perflog.py report <folder>` and confirm it reads the folder without complaint.

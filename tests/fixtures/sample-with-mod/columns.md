@@ -1,4 +1,4 @@
-# Columns of the Performance Log files (version 0.1.0)
+# Columns of the Performance Log files (version 0.1.1)
 
 Generated from the mod's own column definitions. `README.md` explains how to read the numbers; this file only says what each column is.
 
@@ -57,13 +57,13 @@ One row per slow frame (`F`) and per summary window (`S`). Every row has every c
 | `plFixed` | ms | average per frame | Unity frame phase: Fixed update (physics). |
 | `plPre` | ms | average per frame | Unity frame phase: Pre-update. |
 | `plUpdate` | ms | average per frame | Unity frame phase: Update: every script's Update, including the game's tick loop and the singleton updates. |
-| `plLate` | ms | average per frame | Unity frame phase: Late update (LateUpdate scripts, cameras). |
+| `plLate` | ms | average per frame | Unity frame phase: Pre late update: every script's LateUpdate, animation and cameras. The game's own late singletons (lateMs) are only a small part of it, so a big plLate with a small lateMs is work in Unity or another script that this log cannot name. |
 | `plPost` | ms | average per frame | Unity frame phase: Post late update: drawing, presenting the frame and the wait for vertical sync. |
 | `prGcBytes` | bytes | average per frame | Unity profiler: bytes allocated on the managed heap in the last frame (0 if the counter is not available). |
 | `prGcCount` | count | average per frame | Unity profiler: number of managed allocations in the last frame. |
-| `prDraw` | count | average per frame | Unity profiler: draw calls. |
+| `prDraw` | count | average per frame | Unity profiler: draw calls. Where Unity 6 has no single counter, the sum of its standard, instanced, SRP-batcher, indirect and BRG draw call counters (the header says which were found). |
 | `prSetPass` | count | average per frame | Unity profiler: set-pass calls (material switches). |
-| `prBatches` | count | average per frame | Unity profiler: batches. |
+| `prBatches` | count | average per frame | Unity profiler: batches (Unity 6 players do not have this counter, so it stays 0 there). |
 | `prTris` | count | average per frame | Unity profiler: triangles drawn. |
 | `ftCpu` | ms | average per frame | Unity frame timing: the frame on the processor. 0 when the game's player settings leave frame timing off. |
 | `ftMain` | ms | average per frame | Unity frame timing: the main thread. |
@@ -127,7 +127,7 @@ One row per key per window. The last three columns (`name`, `assembly`, `mod`) a
 | `calls` | count | total | Calls in the window. Exact for singletons and watched methods, estimated (samples times the interval) for entities and components. |
 | `sampled` | count | total | Calls that were actually timed. ms and allocKB are scaled up from these, so a small number means a rough estimate. |
 | `ms` | ms | total | Time spent in all the calls in the window (scaled up from the sampled ones), including everything inside them. |
-| `allocKB` | KB | total | Managed memory allocated by all the calls in the window (scaled up). Coarse when the allocation source is the heap size. |
+| `allocKB` | KB | total | Managed memory allocated by all the calls in the window (scaled up). Coarse when the allocation source is the heap size. For load steps (window 0) it is how much the managed heap grew during the step; a collection in the middle makes it read low. |
 | `maxMs` | ms | largest | The slowest timed call in the window. A large value with a small ms is a rare hitch. |
 | `name` |  | last | The singleton's or component's class, the entity's prefab name, or the method. Written after the numbers. |
 | `assembly` |  | last | The DLL the class lives in. |

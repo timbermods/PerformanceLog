@@ -20,6 +20,12 @@ namespace PerformanceLog
         public static string ModeName => Mode == ModeThread ? "GC.GetAllocatedBytesForCurrentThread (exact)" :
                                          Mode == ModeHeap ? "GC.GetTotalMemory(false) (coarse: moves only when the heap grows)" : "none";
 
+        /// <summary>Why the exact counter was not used, when it was tried and rejected. Empty otherwise. For the header.</summary>
+        public static string Note { get; private set; } = "";
+
+        /// <summary>The mode's name and, if the exact counter was rejected, why (one line, no pipes).</summary>
+        public static string Describe() => Note.Length == 0 ? ModeName : ModeName + "; " + Note;
+
         static Func<long> threadBytes;
 
         /// <summary>True when allocation can be measured at all.</summary>
@@ -30,12 +36,14 @@ namespace PerformanceLog
         {
             threadBytes = null;
             Mode = ModeNone;
+            Note = "";
             try
             {
                 if (!preferHeap)
                 {
                     MethodInfo method = typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
-                    if (method != null)
+                    if (method == null) Note = "GC.GetAllocatedBytesForCurrentThread does not exist in this runtime";
+                    else
                     {
                         var candidate = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), method);
                         long before = candidate();
@@ -45,6 +53,7 @@ namespace PerformanceLog
                         long after = candidate();
                         GC.KeepAlive(probe);
                         if (after - before >= 60 * 1024) { threadBytes = candidate; Mode = ModeThread; return; }
+                        Note = "GC.GetAllocatedBytesForCurrentThread exists but did not count a 64 KB allocation (read " + before + ", then " + after + ")";
                     }
                 }
                 GC.GetTotalMemory(false);

@@ -62,4 +62,51 @@ namespace PerformanceLog
             }
         }
     }
+
+    /// <summary>
+    /// How much memory the process holds in RAM (its working set). Unity's Mono reports 0 for <c>Environment.WorkingSet</c>, so on Windows
+    /// it is asked of the system directly; anywhere else, or if that fails, the runtime's own figure is used and 0 means "not available".
+    /// </summary>
+    public static class ProcessMemory
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        struct Counters
+        {
+            public uint Size;
+            public uint PageFaultCount;
+            public UIntPtr PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage,
+                QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage;
+        }
+
+        [DllImport("kernel32.dll", EntryPoint = "K32GetProcessMemoryInfo")]
+        static extern bool GetProcessMemoryInfo(IntPtr process, ref Counters counters, uint size);
+        [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+
+        static bool windowsFailed;
+
+        /// <summary>The working set in bytes, or 0 if it cannot be read.</summary>
+        public static long WorkingSetBytes()
+        {
+            if (!windowsFailed)
+            {
+                try
+                {
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    {
+                        var counters = new Counters { Size = (uint)Marshal.SizeOf(typeof(Counters)) };
+                        if (GetProcessMemoryInfo(GetCurrentProcess(), ref counters, counters.Size)) return (long)(ulong)counters.WorkingSetSize;
+                    }
+                    windowsFailed = true;
+                }
+                catch (Exception) { windowsFailed = true; }
+            }
+            try { return Environment.WorkingSet; }
+            catch (Exception) { return 0; }
+        }
+
+        /// <summary>For the header: where the working set figure comes from, or that there is none.</summary>
+        public static string Describe() =>
+            WorkingSetBytes() <= 0 ? "not available (the working set column stays 0)" :
+            windowsFailed ? "from the runtime" : "from Windows";
+    }
 }

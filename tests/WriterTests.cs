@@ -17,6 +17,9 @@ namespace PerformanceLog.Tests
             yield return ("Writer: a file made by a producer is made on the writer thread, and a failing producer does not stop the writer", ProducerRunsOnTheWriterThread);
             yield return ("Writer: rows that were dropped are reported in the file", ReportsDrops);
             yield return ("Writer: rows pushed while it stops are still written", FlushesOnStop);
+            yield return ("Writer: a file can be read (and its size read) while the writer runs, because it is not held open", ReadableWhileRunning);
+            yield return ("Writer: a file someone holds without sharing is retried, and no row is lost", RetriesWhenHeld);
+            yield return ("Memory: the process's working set is readable", WorkingSetIsReadable);
             yield return ("Writer + probe: a scripted session produces files a reader can parse", EndToEnd);
             yield return ("Fixtures: the checked-in sample sessions have the columns and text the mod writes now", FixturesAreCurrent);
         }
@@ -88,6 +91,86 @@ namespace PerformanceLog.Tests
                 Check(!File.Exists(Path.Combine(dir, "summary.md.tmp")), "no temporary file is left");
             }
             finally { Directory.Delete(dir, true); }
+        }
+
+        /// <summary>Waits until <paramref name="done"/> is true, up to a few seconds.</summary>
+        static bool WaitFor(Func<bool> done, int milliseconds = 5000)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (clock.ElapsedMilliseconds < milliseconds)
+            {
+                if (done()) return true;
+                System.Threading.Thread.Sleep(20);
+            }
+            return done();
+        }
+
+        static void ReadableWhileRunning()
+        {
+            string dir = TempDir();
+            try
+            {
+                string path = Path.Combine(dir, "frames.csv"), events = Path.Combine(dir, "events.csv");
+                var ring = new Ring(Columns.Count, 16);
+                var writer = new LogWriter(null);
+                writer.AddTable(path, new[] { "# header" }, Columns.Main, ring);
+                TextChannel channel = writer.AddText(events, "utcMs,tick,kind,ms,detail");
+                Check(writer.Start(), "the writer starts");
+                var row = new double[Columns.Count];
+                row[Columns.Type] = 'F'; row[Columns.Frame] = 3;
+                ring.TryPush(row);
+                channel.Write("1,2,save,3.0,\"x\"");
+                Check(WaitFor(() => File.ReadAllLines(path).Length >= 3 && File.ReadAllLines(events).Length >= 2), "the rows reach the file while the writer is still running");
+                // The default way to read a file (share mode Read) fails against a file another handle has open for writing. The zip that
+                // was made from the first recording's live folder skipped exactly these files.
+                using (var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    Check(reader.Length > 0, "the file is readable with the strictest share mode");
+                Check(new FileInfo(path).Length > 0, "and its size in a folder listing is its size, not 0");
+                File.Copy(path, Path.Combine(dir, "copy.csv"));
+                Check(File.ReadAllLines(Path.Combine(dir, "copy.csv")).Length >= 3, "and it can be copied");
+                // A reader that deletes nothing and holds nothing must not stop later rows arriving.
+                ring.TryPush(row);
+                Check(WaitFor(() => File.ReadAllLines(path).Length >= 4), "rows written after the copy arrive too");
+                writer.Stop();
+                Check(writer.Failure == null, "no failure: " + writer.Failure);
+                Equal("# end", File.ReadAllLines(path).Last());
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        static void RetriesWhenHeld()
+        {
+            string dir = TempDir();
+            try
+            {
+                string path = Path.Combine(dir, "frames.csv"), events = Path.Combine(dir, "events.csv");
+                var ring = new Ring(Columns.Count, 16);
+                var writer = new LogWriter(null);
+                writer.AddTable(path, new string[0], Columns.Main, ring);
+                TextChannel channel = writer.AddText(events, "utcMs,tick,kind,ms,detail");
+                Check(writer.Start());
+                var row = new double[Columns.Count];
+                row[Columns.Type] = 'S'; row[Columns.Frame] = 9;
+                int before = File.ReadAllLines(path).Length;
+                using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+                using (new FileStream(events, FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    ring.TryPush(row);
+                    channel.Write("1,2,warning,0.0,\"held\"");
+                    System.Threading.Thread.Sleep(LogWriter.DrainMilliseconds * 3);
+                }
+                Check(WaitFor(() => File.ReadAllLines(path).Length > before && File.ReadAllLines(events).Length >= 2), "the row and the event arrive once the file is let go");
+                writer.Stop();
+                Check(writer.Failure == null, "the hold was not treated as a failure: " + writer.Failure);
+                Check(File.ReadAllLines(path).Any(l => l.StartsWith("S,9,")), "the row was kept");
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        static void WorkingSetIsReadable()
+        {
+            Check(ProcessMemory.WorkingSetBytes() > 1_000_000, "the process holds more than a megabyte: " + ProcessMemory.WorkingSetBytes());
+            Check(ProcessMemory.Describe().StartsWith("from"), ProcessMemory.Describe());
         }
 
         static void UnopenablePath()

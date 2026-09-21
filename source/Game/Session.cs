@@ -79,7 +79,8 @@ namespace PerformanceLog
                 Probe.Calibrate();
                 Profile.BudgetFraction = cfg.OverheadBudgetPercent / 100.0;
                 Dictionary<string, string> owners = services.Mods != null ? EnvironmentInfo.AssemblyOwners(services.Mods) : new Dictionary<string, string>();
-                Profile.ModResolver = assembly => owners.TryGetValue(assembly ?? "", out string mod) ? mod : null;
+                // A mod's DLL names the mod; anything else is the game's own if its assembly says so, and otherwise unknown.
+                Profile.ModResolver = Profile.ResolverFor(owners);
                 UnityExtras.Start();
                 UnityExtras.ColonySampler = SampleColony;
                 PlayerLoopTiming.Install();
@@ -194,8 +195,9 @@ namespace PerformanceLog
             header.Note("in summary (S) rows times and Unity's figures are averages per frame; allocation (KB), counts and the two histograms are totals over the window's frames.");
             foreach (string problem in config.Problems) header.Note("config: " + problem);
 
-            header.Pipe("capability", "allocSource", Alloc.ModeName);
+            header.Pipe("capability", "allocSource", Alloc.Describe());
             header.Pipe("capability", "cpuTimes", Cpu.Available ? "available" : "unavailable (Windows only)");
+            header.Pipe("capability", "workingSet", ProcessMemory.Describe());
             header.Append(UnityExtras.StartLines());
             header.Pipe("capability", "playerLoop", PlayerLoopTiming.Installed > 0 ? "timing " + PlayerLoopTiming.Installed + " phases" : "not installed");
             foreach (string result in Instrumentation.Results)
@@ -291,7 +293,7 @@ namespace PerformanceLog
                 var steps = new List<LoadRecorder.Step>();
                 var phases = new List<KeyValuePair<string, long>>();
                 LoadRecorder.TakeNew(steps, phases);
-                foreach (LoadRecorder.Step step in steps) Profile.WriteLoadRow(step.Kind, step.Name, step.Assembly, step.Ticks, 0, ProfileRing());
+                foreach (LoadRecorder.Step step in steps) Profile.WriteLoadRow(step.Kind, step.Name, step.Assembly, step.Ticks, 0, ProfileRing(), step.Bytes);
                 foreach (var phase in phases) Event("load-phase", phase.Value * 1000.0 / Stopwatch.Frequency, phase.Key);
             }
             catch (Exception e) { Log.Warning("Could not write the load steps: " + e.Message); }
@@ -346,7 +348,7 @@ namespace PerformanceLog
             if (colony != null && colony.Length >= 4)
                 input.Colony = colony[1].ToString("F0", CultureInfo.InvariantCulture) + " beavers, " + colony[2].ToString("F0", CultureInfo.InvariantCulture) + " bots, " +
                                colony[0].ToString("F0", CultureInfo.InvariantCulture) + " entities, day " + colony[3].ToString("F0", CultureInfo.InvariantCulture);
-            input.Capabilities.Add("allocation source: " + Alloc.ModeName);
+            input.Capabilities.Add("allocation source: " + Alloc.Describe());
             input.Capabilities.Add("processor times: " + (Cpu.Available ? "available" : "unavailable (Windows only)"));
             input.Capabilities.Add("Unity's frame phases: " + (PlayerLoopTiming.Installed > 0 ? "timed (" + PlayerLoopTiming.Installed + " phases)" : "NOT measured"));
             foreach (string line in UnityExtras.StartLines()) input.Capabilities.Add(line.Replace("# capability|", "").Replace("|", ": "));

@@ -39,6 +39,8 @@ namespace PerformanceLog.Tests
             yield return ("Game: wrapping twice does not wrap the wrappers", NoDoubleWrapping);
             yield return ("Game: the wrappers wait for the first tick, so other mods' Load postfixes still see the game's own singletons", WrappingWaitsForTheFirstTick);
             yield return ("Game: the wrappers go in once per service, and again for the next game", WrappingIsOncePerService);
+            yield return ("Game: two services that update every frame and alternate are each wrapped once, not swapped again every frame", WrappingHandlesServicesThatAlternate);
+            yield return ("Game: the loading patches' counters survive the session starting in the middle of the load", LoadCountersSurviveTheSessionStart);
             yield return ("Game: Profile = off does not patch every entity tick, and only deep patches components", ProfileOffSkipsEntityPatches);
             yield return ("Game: a save left open by an exception does not block the next one", AbandonedSaveIsForgotten);
             yield return ("Game: the game's parallel tick figure is not added twice when a save finishes it again", ParallelTickCountedOnce);
@@ -401,6 +403,46 @@ namespace PerformanceLog.Tests
                 Instrumentation.ResetForSession();
                 Equal(0L, Instrumentation.Hits[Instrumentation.HitTickServiceLoad], "a new session starts counting from zero");
             }
+        }
+
+        static void WrappingHandlesServicesThatAlternate()
+        {
+            Rig rig = StartRig(out Everything singleton);
+            using (rig)
+            {
+                Instrumentation.ResetForSession();
+                // The game keeps more than one singleton service alive and both update every frame, so their prefixes alternate. Remembering only
+                // the last service made every call swap the arrays again (the first recording: 4 swaps a frame).
+                object appLevel = NewLifecycle(singleton), gameLevel = NewLifecycle(singleton);
+                Call(appLevel, "LoadAll"); Call(gameLevel, "LoadAll");
+                long start = Instrumentation.Hits[Instrumentation.HitTickServiceLoad];
+                for (int frame = 0; frame < 50; frame++)
+                {
+                    Instrumentation.EnsureUpdatableWrapped(appLevel);
+                    Instrumentation.EnsureUpdatableWrapped(gameLevel);
+                    Instrumentation.EnsureLateUpdatableWrapped(appLevel);
+                    Instrumentation.EnsureLateUpdatableWrapped(gameLevel);
+                }
+                Equal(start + 4, Instrumentation.Hits[Instrumentation.HitTickServiceLoad], "two services, two arrays each: four swaps in all, not four a frame");
+                Check(UpdatablesIn(appLevel).All(x => x is TimedUpdatable) && UpdatablesIn(gameLevel).All(x => x is TimedUpdatable), "and both are wrapped");
+                Equal(1, UpdatablesIn(appLevel).Count(x => x is TimedUpdatable), "each once, not wrapped again");
+            }
+        }
+
+        static void LoadCountersSurviveTheSessionStart()
+        {
+            Instrumentation.ResetForSession();
+            Instrumentation.Hits[Instrumentation.HitLoadAll] = 0; Instrumentation.Hits[Instrumentation.HitLoadPhase] = 0;
+            Instrumentation.LoadAllPrefix();
+            Instrumentation.Hits[Instrumentation.HitLoadPhase] = 3;
+            Instrumentation.Hits[Instrumentation.HitUpdate] = 9;
+            Instrumentation.ResetForSession();   // a session starts in PostLoad, in the middle of the load
+            Equal(1L, Instrumentation.Hits[Instrumentation.HitLoadAll], "LoadAll ran, and the log does not say it never did");
+            Equal(3L, Instrumentation.Hits[Instrumentation.HitLoadPhase], "nor the load phases that ran before the session");
+            Equal(0L, Instrumentation.Hits[Instrumentation.HitUpdate], "everything else starts from zero");
+            Instrumentation.LoadAllPrefix();
+            Equal(0L, Instrumentation.Hits[Instrumentation.HitLoadPhase], "the next load counts afresh");
+            LoadRecorder.End();
         }
 
         static void ProfileOffSkipsEntityPatches()

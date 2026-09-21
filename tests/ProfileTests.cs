@@ -23,6 +23,8 @@ namespace PerformanceLog.Tests
             yield return ("Profile: load steps are written straight to the file as window 0", LoadRows);
             yield return ("Profile: totals over the session add up across windows", SessionTotals);
             yield return ("Profile: mods are found by assembly, and the game's own are named game", ModResolution);
+            yield return ("Profile: the resolver the game side installs names a mod's DLL, the game's DLLs and leaves the rest unknown", ResolverForOwners);
+            yield return ("Profile: a load step's heap growth is written as its allocation", LoadRowAllocation);
             yield return ("Profile: rows too small to matter are left out", TinyRowsSkipped);
         }
 
@@ -320,6 +322,36 @@ namespace PerformanceLog.Tests
                 Profile.ModResolver = a => throw new InvalidOperationException("resolver failed");
                 Equal("", Profile.ModOf(Profile.IdFor(ProfileKind.TickSingleton, "Z3", "Anything")), "a failing resolver does not stop a key being registered");
                 Profile.ModResolver = null;
+            }
+        }
+
+        static void ResolverForOwners()
+        {
+            Prepare(out Rig rig);
+            using (rig)
+            {
+                var owners = new Dictionary<string, string> { ["MyModAssembly"] = "kyler.mymod" };
+                Profile.ModResolver = Profile.ResolverFor(owners);
+                Equal("kyler.mymod", Profile.ModOf(Profile.IdFor(ProfileKind.TickSingleton, "X", "MyModAssembly")));
+                Equal("game", Profile.ModOf(Profile.IdFor(ProfileKind.TickSingleton, "Y", "Timberborn.WaterSystem")), "the game's own singletons are not unknown");
+                Equal("game", Profile.ModOf(Profile.IdFor(ProfileKind.UpdateSingleton, "Y2", "Bindito.Core")));
+                Equal("", Profile.ModOf(Profile.IdFor(ProfileKind.TickSingleton, "Z", "SomeOtherLibrary")));
+                Equal("", Profile.ModOf(Profile.IdFor(ProfileKind.TickSingleton, "Z2", "")), "no assembly, no answer");
+                Profile.ModResolver = null;
+            }
+        }
+
+        static void LoadRowAllocation()
+        {
+            Prepare(out Rig rig);
+            using (rig)
+            {
+                Profile.WriteLoadRow(ProfileKind.Load, "Big.Loader", "SomeMod", Rig.Ms(100), 0, rig.Prof, 300L * 1024 * 1024);
+                Profile.WriteLoadRow(ProfileKind.Load, "Small.Loader", "SomeMod", Rig.Ms(100), 0, rig.Prof);
+                List<double[]> rows = rig.ProfileRows();
+                Equal(300.0 * 1024, rows[0][7], "allocKB of the step that grew the heap by 300 MB");
+                Equal(0.0, rows[1][7], "a step measured with nothing stays 0");
+                Near(300.0 * 1024, Profile.Totals().Single(x => x.Name == "Big.Loader").Kb, .001, "and the session total has it");
             }
         }
 

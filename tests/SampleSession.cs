@@ -42,7 +42,7 @@ namespace PerformanceLog.Tests
             var header = new HeaderBuilder("frames", HeaderBuilder.FramesFormat);
             header.Add("session", "sample-" + (withMod ? "with-mod" : "without-mod"));
             header.Add("started", "2026-01-01 12:00:00 +00:00 local, 2026-01-01 12:00:00 UTC");
-            header.Add("mod", "0.1.0");
+            header.Add("mod", "0.1.1");
             header.Add("game", "1.1.2.4 (this is a made-up sample, not a game)");
             header.Add("unity", "6000.0.0f1");
             header.Add("os", "Windows 11 (10.0.26200) 64bit");
@@ -70,7 +70,7 @@ namespace PerformanceLog.Tests
             header.Pipe("cmdline", "Timberborn.exe");
             header.Add("mods", withMod ? "3" : "2");
             header.Mod("Harmony", "Harmony", "v2.4.1");
-            header.Mod("kyler.performancelog", "Performance Log", "v0.1.0");
+            header.Mod("kyler.performancelog", "Performance Log", "v0.1.1");
             if (withMod) header.Mod(ModId, "Late Game Performance", "v0.4.9");
             header.Pipe("patch", "hot", "Timberborn.TickSystem.Ticker.Update", "prefix", "kyler.performancelog", "priority=0", "index=0", "before=", "after=", "PerformanceLog", "PerformanceLog.Instrumentation.TickPrefix");
 
@@ -220,8 +220,8 @@ namespace PerformanceLog.Tests
             writer.SetFile(summary, Summary.Render(BuildInput(withMod, "finished")));
             writer.Stop();
             if (writer.Failure != null) throw new Exception("the sample writer failed: " + writer.Failure);
-            File.WriteAllText(Path.Combine(directory, "README.md"), SessionReadme.Render(ReadTemplate(), "0.1.0"));
-            File.WriteAllText(Path.Combine(directory, "columns.md"), SessionReadme.RenderColumns("0.1.0"));
+            File.WriteAllText(Path.Combine(directory, "README.md"), SessionReadme.Render(ReadTemplate(), "0.1.1"));
+            File.WriteAllText(Path.Combine(directory, "columns.md"), SessionReadme.RenderColumns("0.1.1"));
             Probe.TestClock = null;
             Probe.HeavySampler = null;
             Alloc.Init();
@@ -232,7 +232,7 @@ namespace PerformanceLog.Tests
         {
             var input = new SummaryInput
             {
-                SessionId = "sample-" + (withMod ? "with-mod" : "without-mod"), Status = status, ModVersion = "0.1.0", GameVersion = "1.1.2.4 (sample)",
+                SessionId = "sample-" + (withMod ? "with-mod" : "without-mod"), Status = status, ModVersion = "0.1.1", GameVersion = "1.1.2.4 (sample)",
                 StartedLocal = "2026-01-01 12:00:00", Seconds = Probe.SessionSeconds, Ticks = Probe.TickCount, Row = Probe.SessionRow(), Stats = Probe.Stats,
                 Worst = Probe.WorstFrames(), Windows = Probe.Windows(), Totals = Profile.Totals(), TickIntervalSeconds = 0.3, Folder = "sample",
                 Colony = "240 beavers, 12 bots, 9000 entities, day 20",
@@ -241,7 +241,7 @@ namespace PerformanceLog.Tests
             input.Environment.Add(new KeyValuePair<string, string>("Display", "vSync on, 60 Hz, 2560x1440"));
             input.Environment.Add(new KeyValuePair<string, string>("Garbage collector", "mode=Enabled incremental=False"));
             input.Mods.Add(new[] { "Harmony", "Harmony", "v2.4.1" });
-            input.Mods.Add(new[] { "kyler.performancelog", "Performance Log", "v0.1.0" });
+            input.Mods.Add(new[] { "kyler.performancelog", "Performance Log", "v0.1.1" });
             if (withMod) input.Mods.Add(new[] { ModId, "Late Game Performance", "v0.4.9" });
             input.Capabilities.Add("allocation source: scripted counter");
             input.Capabilities.Add("processor times: unavailable in this sample");

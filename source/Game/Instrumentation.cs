@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reflection;
@@ -282,24 +283,40 @@ namespace PerformanceLog
             }
         }
 
-        /// <summary>What running one of these patches costs when it does nothing, by patching a method of our own.</summary>
+        /// <summary>
+        /// What running one of these patches costs when it does nothing, by patching a method of our own. Both loops are warmed up first (the first
+        /// call of a method is compiled, and a patched one goes through a freshly made wrapper), and the least of a few rounds is taken, so
+        /// one-off costs and the scheduler do not decide the figure. In the first game recording this read 0 because the unwarmed baseline
+        /// included the compile.
+        /// </summary>
         internal static void MeasurePatchCost()
         {
             try
             {
                 MethodInfo target = Reflect.Own(typeof(Instrumentation), nameof(CostTarget));
-                const int repeats = 4000;
-                long t0 = Stopwatch.GetTimestamp();
-                for (int i = 0; i < repeats; i++) CostTarget(i);
-                double baseline = (Stopwatch.GetTimestamp() - t0) / (double)repeats;
+                const int repeats = 4000, rounds = 5;
+                for (int i = 0; i < 400; i++) CostTarget(i);
+                double baseline = TimeCostTarget(repeats, rounds);
                 harmony.Patch(target, new HarmonyMethod(Reflect.Own(typeof(Instrumentation), nameof(CostPrefix))), new HarmonyMethod(Reflect.Own(typeof(Instrumentation), nameof(CostPostfix))));
-                t0 = Stopwatch.GetTimestamp();
-                for (int i = 0; i < repeats; i++) CostTarget(i);
-                double patched = (Stopwatch.GetTimestamp() - t0) / (double)repeats;
+                for (int i = 0; i < 400; i++) CostTarget(i);
+                double patched = TimeCostTarget(repeats, rounds);
                 harmony.Unpatch(target, HarmonyPatchType.All, HarmonyId);
                 Probe.PatchCallTicks = Math.Max(0, patched - baseline);
             }
             catch (Exception e) { Log.Warning("Could not measure what a patch costs: " + e.Message); }
+        }
+
+        /// <summary>Stopwatch ticks for one call of <see cref="CostTarget"/>: the fastest of several rounds.</summary>
+        static double TimeCostTarget(int repeats, int rounds)
+        {
+            double best = double.MaxValue;
+            for (int round = 0; round < rounds; round++)
+            {
+                long t0 = Stopwatch.GetTimestamp();
+                for (int i = 0; i < repeats; i++) CostTarget(i);
+                best = Math.Min(best, (Stopwatch.GetTimestamp() - t0) / (double)repeats);
+            }
+            return best;
         }
 
         static long costSink;
@@ -447,13 +464,25 @@ namespace PerformanceLog
 
         // The wrappers are put into the game's arrays on the first tick and the first frame, not when a scene loads. By then every other mod's postfix on
         // Load has run, so a mod that looks at what is in those arrays (BeaverBuddies reorders the once-per-tick singletons by their type) still sees the
-        // game's own singletons, and tick order is what it would be without this mod. Once per service, and the reference is weak so an old game is not kept alive.
-        static readonly WeakReference tickWrapped = new WeakReference(null), updateWrapped = new WeakReference(null), lateWrapped = new WeakReference(null);
+        // game's own singletons, and tick order is what it would be without this mod. Once per service, and the services are held weakly so an old game
+        // is not kept alive. More than one service is alive at a time (the game's has its own, and the application's updates every frame too), and they
+        // alternate within a frame, so a single remembered service would be swapped back and forth: the first recording counted 488601 swaps in 122150 frames.
+        static readonly ConditionalWeakTable<object, object> tickWrapped = new ConditionalWeakTable<object, object>(),
+            updateWrapped = new ConditionalWeakTable<object, object>(), lateWrapped = new ConditionalWeakTable<object, object>();
+        static readonly object wrappedMarker = new object();
+
+        /// <summary>True the first time a service is offered to the table, false ever after (and for null).</summary>
+        static bool FirstTime(ConditionalWeakTable<object, object> seen, object service)
+        {
+            if (service == null || seen.TryGetValue(service, out _)) return false;
+            try { seen.Add(service, wrappedMarker); }
+            catch (ArgumentException) { return false; }
+            return true;
+        }
 
         internal static void EnsureTickSingletonsWrapped(object service)
         {
-            if (service == null || ReferenceEquals(tickWrapped.Target, service)) return;
-            tickWrapped.Target = service;
+            if (!FirstTime(tickWrapped, service)) return;
             try
             {
                 SingletonArrays.SwapTickSingletons(service);
@@ -465,8 +494,7 @@ namespace PerformanceLog
 
         internal static void EnsureUpdatableWrapped(object service)
         {
-            if (service == null || ReferenceEquals(updateWrapped.Target, service)) return;
-            updateWrapped.Target = service;
+            if (!FirstTime(updateWrapped, service)) return;
             try
             {
                 SingletonArrays.Swap<IUpdatableSingleton>(service, "_updatableSingletons", x => new TimedUpdatable(x));
@@ -477,8 +505,7 @@ namespace PerformanceLog
 
         internal static void EnsureLateUpdatableWrapped(object service)
         {
-            if (service == null || ReferenceEquals(lateWrapped.Target, service)) return;
-            lateWrapped.Target = service;
+            if (!FirstTime(lateWrapped, service)) return;
             try
             {
                 SingletonArrays.Swap<ILateUpdatableSingleton>(service, "_lateUpdatableSingletons", x => new TimedLateUpdatable(x));
@@ -490,7 +517,11 @@ namespace PerformanceLog
         /// <summary>Forgets what the last session counted. Called when a session starts.</summary>
         internal static void ResetForSession()
         {
+            // A session starts in the middle of loading (in PostLoad), after the loading patches have counted, so those two counters are not
+            // cleared: LoadAllPrefix starts them afresh for each load. (The first recording said LoadAll "never ran" for this reason.)
+            long loadAll = Hits[HitLoadAll], loadPhases = Hits[HitLoadPhase];
             Array.Clear(Hits, 0, Hits.Length);
+            Hits[HitLoadAll] = loadAll; Hits[HitLoadPhase] = loadPhases;
             lastParallelTick = default;
             SaveTracker.Abandon();
         }
@@ -499,7 +530,7 @@ namespace PerformanceLog
         {
             try
             {
-                Hits[HitLoadAll]++;
+                Hits[HitLoadAll] = 1; Hits[HitLoadPhase] = 0;
                 LoadRecorder.Begin();
                 Milestones.Mark("load-begin");
             }

@@ -47,6 +47,40 @@ KIND_TITLES = collections.OrderedDict([
 SLOW_MEAN_MS = 20.0
 LOAD_KINDS = ("load", "load-non-singleton", "post-load", "post-load-non-singleton")
 
+# What is wrong with recordings made by an older Performance Log, found when a recording was first read. Each entry is (fixed in, note): the note
+# is printed at the top of the report for a recording made by an earlier version, so nobody trusts a figure that was known to be off.
+KNOWN_ISSUES = [
+    ("0.1.1", "The mod swapped its timing wrappers into the game's singleton arrays about four times every frame (it remembered only one of the two "
+              "services that alternate). The garbage that made, and the time (inside otherMs, before the timed parts), are in this recording: allocation "
+              "figures (otherKB, allocKB, the garbage-collection section) probably read too high, and the mod's own cost is understated by overheadUs."),
+    ("0.1.1", "In the by-singleton tables every singleton of the game itself is labelled with an empty mod (shown as unknown); read those as the game's own."),
+    ("0.1.1", "workingMB is 0 (the process's memory was not read), loading steps carry no allocation figure, and `# capability-final|patchCalls|SingletonLifecycleService.LoadAll|0|never ran` "
+              "is wrong (it ran before the session's counters were cleared)."),
+    ("0.1.1", "prDraw and prBatches are 0: Unity 6 has no counter by those names (its draw calls are split into several). The other columns are unaffected."),
+    ("0.1.1", "While the game ran, frames.csv, profile.csv, spikes.csv and events.csv were held open by the mod, so copying or zipping the folder could leave them out "
+              "(the folder listing shows size 0). Exit the game first, or read them with shared access."),
+]
+
+GAME_ASSEMBLY_PREFIXES = ("Timberborn.", "Bindito.", "UnityEngine", "Unity.", "System")
+
+
+def game_assembly(assembly):
+    """The same rule the mod uses to call a DLL the game's own, for recordings made before the mod applied it."""
+    return bool(assembly) and (assembly.startswith(GAME_ASSEMBLY_PREFIXES) or assembly in ("Assembly-CSharp", "mscorlib"))
+
+
+def version_tuple(text):
+    numbers = re.findall(r"\d+", text or "")
+    return tuple(int(n) for n in numbers[:3]) if numbers else None
+
+
+def known_issues(session):
+    """Notes about figures in this recording that are known to be off, from the version of the mod that made it."""
+    have = version_tuple(session.h("mod"))
+    if have is None:
+        return []
+    return [note for fixed, note in KNOWN_ISSUES if have < version_tuple(fixed)]
+
 
 # ---------------------------------------------------------------- reading
 
@@ -310,6 +344,8 @@ def profile_window_seconds(session, rows, tick_from=0):
 
 
 def mod_of(session, t):
+    if not t.mod and game_assembly(t.assembly):
+        return "game"
     return t.mod or ("(unknown)" if t.kind not in ("entity",) else "")
 
 
@@ -396,8 +432,12 @@ def findings_for(session, args):
         out.append(Finding("warn", "Measuring itself cost %.1f%% of a frame" % (100 * overhead / mean),
                            "overheadUs + probeUs = %.0f us per frame against a %.1f ms frame." % (overhead * 1000, mean),
                            "Treat small differences with care; try Profile = standard or a lower OverheadBudgetPercent."))
+    have_version = version_tuple(session.h("mod"))
     for p in session.pipe("capability-final"):
         if len(p) >= 3 and p[0] == "patchCalls" and p[-1] == "never ran":
+            # 0.1.0 cleared this counter when the session started, in the middle of loading, so it said the loading patch never ran when it had.
+            if p[1] == "SingletonLifecycleService.LoadAll" and have_version is not None and have_version < (0, 1, 1):
+                continue
             out.append(Finding("warn", "The patch on %s never ran" % p[1], "The columns it feeds are 0 in this session; do not read those zeros as measurements.",
                                "Check the capability lines in the frames.csv header and Player.log for why the patch could not be made."))
     if session.problems:
@@ -549,6 +589,13 @@ def findings_for(session, args):
         if load_total > 3000 or slowest["ms"] > 1500:
             out.append(Finding("info", "Loading the game's singletons took %.1f s; the slowest step was %s (%.0f ms)" % (load_total / 1000, short(slowest.get("name", "?")), slowest["ms"]),
                                "Steps of kind %s are in profile.csv (window 0); the mod is %s." % (slowest["kind"], slowest.get("mod") or "unknown"), "Loading a save also includes work outside these steps (reading the file, creating entities)."))
+        grew = sorted((r for r in loads if r.get("allocKB", 0) >= 1024), key=lambda r: -r["allocKB"])
+        grew_total = sum(r.get("allocKB", 0) for r in loads) / 1024.0
+        if grew_total >= 100:
+            top = "; ".join("%s %.0f MB (%s)" % (short(r.get("name", "?"), 48), r["allocKB"] / 1024.0, r["kind"]) for r in grew[:4])
+            out.append(Finding("info", "Loading grew the managed heap by %.0f MB" % grew_total,
+                               "Biggest steps by heap growth: %s. (The heap size before and after each step; a collection in the middle makes a step read low.)" % top,
+                               "That memory is still held after loading if the heap does not fall back at the first collection; compare `heapMB` after the first collections in frames.csv."))
     if not out:
         out.append(Finding("info", "Nothing stands out", "No slow-frame cause, part of the frame or mod crossed the thresholds this tool uses.",
                            "If the drops are real, record a longer session, or lower SlowFrameMs in PerformanceLog.cfg."))
@@ -569,6 +616,8 @@ def report(session, args, out):
     p("%s | %s | %s" % (session.h("cpu", "?"), session.h("gpu", "?"), session.h("os", "?")))
     if not session.ended:
         p("note: the file has no closing line (the game closed abnormally, or the file was copied while the game ran)")
+    for note in known_issues(session):
+        p("KNOWN ISSUE in Performance Log %s: %s" % (session.h("mod", "?"), note))
     p()
     if not allS:
         p("No summary rows: the session was shorter than one summary window, or is empty.")
@@ -730,7 +779,7 @@ def report_json(session, args):
         "session": session.name, "game": session.h("game"), "mod": session.h("mod"), "mods": {k: v[1] for k, v in session.mods.items()},
         "frames": sum(r["frames"] for r in session.summaries), "seconds": seconds_of(session.summaries), "steadyWindows": len(S),
         "meanFrameMs": mean, "p50": percentile(session, S, 0.5), "p90": percentile(session, S, 0.9), "p99": percentile(session, S, 0.99),
-        "slowFrames": len(session.slow),
+        "slowFrames": len(session.slow), "knownIssues": known_issues(session),
         "slotsMsPerFrame": {s: wmean(S, s) for s in SLOTS + ["otherMs"]},
         "collections": total(S, "gcDelta"),
         "findings": [{"severity": f.severity, "title": f.title, "evidence": f.evidence, "check": f.check} for f in findings_for(session, args)],

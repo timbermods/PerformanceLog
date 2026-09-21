@@ -240,14 +240,21 @@ namespace PerformanceLog
             else
             {
                 t.Append("- The game thread used ").Append(F(main)).Append(" ms of processor time per ").Append(F(mean)).Append(" ms frame (").Append(Pct(main, mean))
-                    .Append(" busy). The whole process used ").Append(F(proc)).Append(" ms, or ").Append(F(mean > 0 ? proc / mean : 0, 1)).Append(" cores' worth. ");
+                    .Append(" busy). The whole process used ").Append(F(proc)).Append(" ms, or ").Append(F(mean > 0 ? proc / mean : 0, 1)).Append(" cores' worth (Unity's worker threads can spin while they wait for work, so that overstates what the game needs). ");
                 t.Append("A game thread well under 100% busy in a slow session is waiting (for the graphics card, vertical sync or the worker threads), not computing.\n");
                 if (r[Columns.ExtraBase + 7] > 0)
                     t.Append("- Unity's frame timing: main thread ").Append(F(r[Columns.ExtraBase + 7])).Append(" ms, render thread ").Append(F(r[Columns.ExtraBase + 8])).Append(" ms, graphics card ")
                         .Append(F(r[Columns.ExtraBase + 9])).Append(" ms, main thread waiting to present ").Append(F(r[Columns.ExtraBase + 10])).Append(" ms.\n");
-                if (r[Columns.ExtraBase + 2] > 0)
-                    t.Append("- Drawing, per frame: ").Append(F(r[Columns.ExtraBase + 2], 0)).Append(" draw calls, ").Append(F(r[Columns.ExtraBase + 3], 0)).Append(" set-pass calls, ")
-                        .Append(F(r[Columns.ExtraBase + 4], 0)).Append(" batches, ").Append(F(r[Columns.ExtraBase + 5] / 1000, 0)).Append(" thousand triangles.\n");
+                if (r[Columns.ExtraBase + 2] > 0 || r[Columns.ExtraBase + 3] > 0 || r[Columns.ExtraBase + 5] > 0)
+                {
+                    // Only the counters this Unity build has: a source that is not there reads 0 and must not be printed as "0 draw calls".
+                    var drawing = new List<string>();
+                    if (r[Columns.ExtraBase + 2] > 0) drawing.Add(F(r[Columns.ExtraBase + 2], 0) + " draw calls");
+                    if (r[Columns.ExtraBase + 3] > 0) drawing.Add(F(r[Columns.ExtraBase + 3], 0) + " set-pass calls");
+                    if (r[Columns.ExtraBase + 4] > 0) drawing.Add(F(r[Columns.ExtraBase + 4], 0) + " batches");
+                    if (r[Columns.ExtraBase + 5] > 0) drawing.Add(F(r[Columns.ExtraBase + 5] / 1000, 0) + " thousand triangles");
+                    t.Append("- Drawing, per frame: ").Append(string.Join(", ", drawing)).Append("\n");
+                }
                 t.Append('\n');
             }
         }
@@ -303,10 +310,19 @@ namespace PerformanceLog
             var loads = s.Totals.Where(x => x.Kind >= ProfileKind.Load).OrderByDescending(x => x.Ms).Take(10).ToList();
             if (loads.Count > 0)
             {
-                t.Append("**Slowest steps of loading the game** (one time; ").Append(F(s.Totals.Where(x => x.Kind >= ProfileKind.Load).Sum(x => x.Ms), 0)).Append(" ms in all steps)\n\n| Step | Name | Mod | ms |\n|---|---|---|---|\n");
+                t.Append("**Slowest steps of loading the game** (one time; ").Append(F(s.Totals.Where(x => x.Kind >= ProfileKind.Load).Sum(x => x.Ms), 0)).Append(" ms in all steps)\n\n| Step | Name | Mod | ms | heap grew MB |\n|---|---|---|---|---|\n");
                 foreach (Profile.Total x in loads)
-                    t.Append("| ").Append(ProfileKinds.Words[(int)x.Kind]).Append(" | `").Append(Short(x.Name)).Append("` | ").Append(x.Mod).Append(" | ").Append(F(x.Ms, 1)).Append(" |\n");
+                    t.Append("| ").Append(ProfileKinds.Words[(int)x.Kind]).Append(" | `").Append(Short(x.Name)).Append("` | ").Append(x.Mod).Append(" | ").Append(F(x.Ms, 1)).Append(" | ").Append(F(x.Kb / 1024.0, 1)).Append(" |\n");
                 t.Append('\n');
+                var grew = s.Totals.Where(x => x.Kind >= ProfileKind.Load && x.Kb >= 1024).OrderByDescending(x => x.Kb).Take(10).ToList();
+                if (grew.Count > 0)
+                {
+                    t.Append("**Steps of loading that grew the managed heap most** (the heap size before and after each step; a garbage collection in the middle makes a step read low; ")
+                        .Append(F(s.Totals.Where(x => x.Kind >= ProfileKind.Load).Sum(x => x.Kb) / 1024.0, 0)).Append(" MB in all steps)\n\n| Step | Name | Mod | heap grew MB | ms |\n|---|---|---|---|---|\n");
+                    foreach (Profile.Total x in grew)
+                        t.Append("| ").Append(ProfileKinds.Words[(int)x.Kind]).Append(" | `").Append(Short(x.Name)).Append("` | ").Append(x.Mod).Append(" | ").Append(F(x.Kb / 1024.0, 1)).Append(" | ").Append(F(x.Ms, 1)).Append(" |\n");
+                    t.Append('\n');
+                }
             }
         }
 

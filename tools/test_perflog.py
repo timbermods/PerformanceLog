@@ -513,6 +513,56 @@ class FindingTests(unittest.TestCase):
         text = self.report(s)
         self.assertIn("The patch on TickableEntityBucket.TickAll never ran", text)
 
+    def test_an_older_mod_version_gets_its_known_issues_listed(self):
+        s = Synthetic(header={"mod": "0.1.0"})
+        for _ in range(6):
+            s.window()
+        text = self.report(s)
+        self.assertIn("KNOWN ISSUE in Performance Log 0.1.0", text)
+        self.assertIn("four times every frame", text)
+        s = Synthetic(header={"mod": "0.1.1"})
+        for _ in range(6):
+            s.window()
+        self.assertNotIn("KNOWN ISSUE", self.report(s), "the version that fixed them has none")
+        s = Synthetic(header={"mod": "something else"})
+        for _ in range(6):
+            s.window()
+        self.assertNotIn("KNOWN ISSUE", self.report(s), "an unreadable version is not guessed at")
+
+    def test_the_loadall_counter_bug_of_0_1_0_is_not_reported_as_a_finding(self):
+        for version, expect in (("0.1.0", False), ("0.1.1", True)):
+            s = Synthetic(header={"mod": version})
+            s.pipes.append(["capability-final", "patchCalls", "SingletonLifecycleService.LoadAll", "0", "never ran"])
+            for _ in range(6):
+                s.window()
+            text = self.report(s)
+            self.assertEqual(expect, "The patch on SingletonLifecycleService.LoadAll never ran" in text, version)
+
+    def test_game_singletons_with_an_empty_mod_are_read_as_the_game(self):
+        s = Synthetic(header={"mod": "0.1.0"})
+        for i in range(6):
+            s.window(frame_ms=30.0, updMs=12.0)
+        for w in range(1, 7):
+            s.profile.append({"kind": "update-singleton", "window": w, "tick": w * 30, "id": 1, "calls": 300, "sampled": 300, "ms": 90.0, "allocKB": 0, "maxMs": 1.0,
+                              "name": "Timberborn.SomethingUI.Panel", "assembly": "Timberborn.SomethingUI", "mod": ""})
+            s.profile.append({"kind": "update-singleton", "window": w, "tick": w * 30, "id": 2, "calls": 300, "sampled": 300, "ms": 30.0, "allocKB": 0, "maxMs": 1.0,
+                              "name": "Other.Library.Thing", "assembly": "OtherLibrary", "mod": ""})
+        text = self.report(s)
+        self.assertRegex(text, r"Timberborn\.SomethingUI\.Panel\s+game\b")
+        self.assertRegex(text, r"Other\.Library\.Thing\s+\(unknown\)")
+
+    def test_loading_that_grew_the_heap_is_reported(self):
+        s = Synthetic()
+        for _ in range(6):
+            s.window()
+        s.profile.append({"kind": "load-non-singleton", "window": 0, "tick": 0, "id": 5, "calls": 1, "sampled": 1, "ms": 8000.0, "allocKB": 900 * 1024, "maxMs": 8000.0,
+                          "name": "Timberborn.WorldPersistence.WorldEntitiesLoader", "assembly": "Timberborn.WorldPersistence", "mod": "game"})
+        s.profile.append({"kind": "load", "window": 0, "tick": 0, "id": 6, "calls": 1, "sampled": 1, "ms": 300.0, "allocKB": 400 * 1024, "maxMs": 300.0,
+                          "name": "Timberborn.SomethingSystem.Thing", "assembly": "Timberborn.SomethingSystem", "mod": "game"})
+        text = self.report(s)
+        self.assertIn("Loading grew the managed heap by 1300 MB", text)
+        self.assertIn("WorldEntitiesLoader 900 MB", text)
+
     def test_quiet_session_says_nothing_stands_out(self):
         s = Synthetic(header={"display": "vSyncCount=0 refreshHz=60.00"})
         for _ in range(6):
