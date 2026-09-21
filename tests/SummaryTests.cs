@@ -14,6 +14,7 @@ namespace PerformanceLog.Tests
             yield return ("Summary: every section is there for a session with data, and names the mods and singletons", FullSummary);
             yield return ("Summary: a session with no profile and no slow frames still renders", NothingSlow);
             yield return ("Summary: component time is rolled up by mod, and load steps are listed slowest first", ComponentAndLoadTables);
+            yield return ("Summary: slow frames without a row of their own are said to be counted", SkippedRowsAreExplained);
             yield return ("Summary: long class names are shortened and short ones kept", ShortNames);
             yield return ("Readme: placeholders are filled and no placeholder is left", ReadmePlaceholders);
         }
@@ -99,6 +100,22 @@ namespace PerformanceLog.Tests
                 Check(text.Contains("Slowest steps of loading the game"));
                 Check(text.IndexOf("Some.Loader") < text.IndexOf("Other.Loader"), "the slowest load step comes first");
                 Check(!text.Contains("NaN"));
+            }
+            finally { rig.Dispose(); }
+        }
+
+        static void SkippedRowsAreExplained()
+        {
+            var rig = new Rig(thresholdMs: 1000);
+            try
+            {
+                for (int i = 0; i < 5; i++) { rig.Advance(16); rig.Frame(); }
+                SessionStats stats = Probe.Stats.Clone();
+                stats.SlowFrames = 400; stats.SlowRowsSkipped = 100;
+                string text = Summary.Render(new SummaryInput { SessionId = "slow", Row = Probe.SessionRow(), Stats = stats, Seconds = 60 });
+                Check(text.Contains("**100** of those slow frames have no row of their own"), text);
+                stats.SlowRowsSkipped = 0;
+                Check(!Summary.Render(new SummaryInput { SessionId = "ok", Row = Probe.SessionRow(), Stats = stats, Seconds = 60 }).Contains("no row of their own"));
             }
             finally { rig.Dispose(); }
         }

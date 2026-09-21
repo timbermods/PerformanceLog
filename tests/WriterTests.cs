@@ -14,6 +14,7 @@ namespace PerformanceLog.Tests
             yield return ("Writer: header, column names, rows and the closing line end up in the file", WritesTable);
             yield return ("Writer: text after the numbers, an events file and a file rewritten whole", WritesTailsAndFiles);
             yield return ("Writer: a file that cannot be opened is given up and the others carry on", UnopenablePath);
+            yield return ("Writer: a file made by a producer is made on the writer thread, and a failing producer does not stop the writer", ProducerRunsOnTheWriterThread);
             yield return ("Writer: rows that were dropped are reported in the file", ReportsDrops);
             yield return ("Writer: rows pushed while it stops are still written", FlushesOnStop);
             yield return ("Writer + probe: a scripted session produces files a reader can parse", EndToEnd);
@@ -108,6 +109,31 @@ namespace PerformanceLog.Tests
                 var none = new LogWriter(null);
                 none.AddTable(Path.Combine(dir, "nope", "y.csv"), new string[0], Columns.Main, new Ring(Columns.Count, 1));
                 Check(!none.Start(), "no file opened: not started");
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        static void ProducerRunsOnTheWriterThread()
+        {
+            string dir = TempDir();
+            try
+            {
+                var ring = new Ring(Columns.Count, 4);
+                var writer = new LogWriter(null);
+                writer.AddTable(Path.Combine(dir, "f.csv"), new string[0], Columns.Main, ring);
+                writer.AddFile(Path.Combine(dir, "made.md"));
+                writer.AddFile(Path.Combine(dir, "broken.md"));
+                Check(writer.Start());
+                int callerThread = Environment.CurrentManagedThreadId;
+                writer.SetFile(Path.Combine(dir, "made.md"), () => "thread " + Environment.CurrentManagedThreadId);
+                writer.SetFile(Path.Combine(dir, "broken.md"), (Func<string>)(() => throw new InvalidOperationException("the producer failed")));
+                ring.TryPush(new double[Columns.Count]);
+                writer.Stop();
+                string made = File.ReadAllText(Path.Combine(dir, "made.md"));
+                Check(made.StartsWith("thread ") && made != "thread " + callerThread, "the text was made on another thread: " + made);
+                Check(!File.Exists(Path.Combine(dir, "broken.md")), "a failing producer writes nothing");
+                Check(writer.Failure != null && writer.Failure.Contains("broken.md"), "and is reported: " + writer.Failure);
+                Check(File.ReadAllLines(Path.Combine(dir, "f.csv")).Length >= 3, "the other files were still written");
             }
             finally { Directory.Delete(dir, true); }
         }

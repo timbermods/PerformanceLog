@@ -282,12 +282,16 @@ namespace PerformanceLog
 
         public static bool IsOpen { get; private set; }
 
-        /// <summary>Opens a save. False if one is already open (the outer one owns it).</summary>
-        public static bool TryOpen(string description)
+        /// <summary>A save still open after this long was abandoned by an exception (the game's save throws on an IO error and skips its end), not nested.</summary>
+        public const double AbandonedAfterSeconds = 60;
+
+        /// <summary>Opens a save. False if one is already open (the outer one owns it). <paramref name="now"/> is for tests.</summary>
+        public static bool TryOpen(string description, long now = 0)
         {
-            if (IsOpen) return false;
+            if (now == 0) now = Stopwatch.GetTimestamp();
+            if (IsOpen && now - start < AbandonedAfterSeconds * Stopwatch.Frequency) return false;
             Array.Clear(stage, 0, stage.Length);
-            what = description; start = Stopwatch.GetTimestamp(); finishingTick = false; IsOpen = true;
+            what = description; start = now; finishingTick = false; IsOpen = true;
             return true;
         }
 

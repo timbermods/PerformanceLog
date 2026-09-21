@@ -24,6 +24,8 @@ namespace PerformanceLog
         public double ProfileSeconds = 30;
         /// <summary>How many of the biggest contributors to a slow frame are written to the spike file.</summary>
         public int SpikeContributors = 5;
+        /// <summary>At most this many slow frames get a row a minute; the rest are only counted. A game that is slow all the time would otherwise write without limit.</summary>
+        public int MaxSlowRowsPerMinute = 300;
     }
 
     /// <summary>One of the slowest frames of the session, kept for the summary.</summary>
@@ -49,8 +51,19 @@ namespace PerformanceLog
         public double[] SpeedMs = new double[8];
         public double HeapMinMB, HeapMaxMB;
         public long SlowFrames, SlowGcFrames, SlowSaveFrames, SlowUnfocusedFrames, SlowPausedFrames;
+        /// <summary>Slow frames that were counted but got no row because of the per-minute limit.</summary>
+        public long SlowRowsSkipped;
         public double SlowMs;
         public double FirstFrameMs;
+
+        /// <summary>A copy that another thread can read while the game thread goes on counting.</summary>
+        public SessionStats Clone()
+        {
+            var copy = (SessionStats)MemberwiseClone();
+            copy.SpeedFrames = (long[])SpeedFrames.Clone();
+            copy.SpeedMs = (double[])SpeedMs.Clone();
+            return copy;
+        }
     }
 
     /// <summary>
@@ -127,7 +140,8 @@ namespace PerformanceLog
         static readonly long epochTicks = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
         static double thresholdMs;
         static long summaryTicks, profileTicks, nextSummaryTs, nextProfileTs, windowStartTs, profileStartTs, sessionStartTs;
-        static int spikeTop;
+        static int spikeTop, maxSlowPerMinute, slowInWindow;
+        static long slowWindowStart;
         static long lastFrameTs;
         static int frameNo, lastGc, tickCount;
         static long lastMemory, lastAllocSource;
@@ -207,6 +221,8 @@ namespace PerformanceLog
             summaryTicks = Math.Max(1, (long)(settings.SummarySeconds * Stopwatch.Frequency));
             profileTicks = Math.Max(1, (long)(settings.ProfileSeconds * Stopwatch.Frequency));
             spikeTop = Math.Max(0, settings.SpikeContributors);
+            maxSlowPerMinute = Math.Max(1, settings.MaxSlowRowsPerMinute);
+            slowInWindow = 0; slowWindowStart = 0;
             depth = 0; generation++;
             Array.Clear(frameSelf, 0, frameSelf.Length);
             Array.Clear(frameAlloc, 0, frameAlloc.Length);
@@ -447,7 +463,8 @@ namespace PerformanceLog
             if (slow || summaryDue) HeavySampler?.Invoke(Extra);
             double utcMs = UnixMs();
 
-            double profileCost = Profile.EndFrame(slow, frameNo, tickCount, utcMs, frameMs, spikeRing, spikeTop);
+            bool writeSlow = slow && AllowSlowRow(start);
+            double profileCost = Profile.EndFrame(slow, frameNo, tickCount, utcMs, frameMs, writeSlow ? spikeRing : null, spikeTop);
 
             double[] r = row;
             Array.Clear(r, 0, r.Length);
@@ -540,7 +557,8 @@ namespace PerformanceLog
             session[Columns.ProbeUs] += r[Columns.ProbeUs];
             if (slow)
             {
-                frameRing?.TryPush(r);
+                if (writeSlow) frameRing?.TryPush(r);
+                else stats.SlowRowsSkipped++;
                 KeepIfWorst(r);
             }
             if (summaryDue)
@@ -582,6 +600,16 @@ namespace PerformanceLog
                         break;
                 }
             }
+        }
+
+        static bool AllowSlowRow(long now)
+        {
+            if (slowWindowStart == 0 || now - slowWindowStart >= 60L * Stopwatch.Frequency)
+            {
+                slowWindowStart = now;
+                slowInWindow = 0;
+            }
+            return ++slowInWindow <= maxSlowPerMinute;
         }
 
         static void KeepIfWorst(double[] r)

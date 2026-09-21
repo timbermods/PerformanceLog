@@ -19,7 +19,7 @@ namespace PerformanceLog.Tests
 
         public static long Ms(double milliseconds) => (long)(milliseconds * Stopwatch.Frequency / 1000.0);
 
-        public Rig(double thresholdMs = 50, double summarySeconds = 100000, double profileSeconds = 100000, int spikeTop = 5)
+        public Rig(double thresholdMs = 50, double summarySeconds = 100000, double profileSeconds = 100000, int spikeTop = 5, int maxSlowRowsPerMinute = 300)
         {
             Probe.Stop();
             Probe.TestClock = () => Now;
@@ -30,6 +30,7 @@ namespace PerformanceLog.Tests
             {
                 Frames = Frames, Profile = Prof, Spikes = Spikes, GameThreadId = Environment.CurrentManagedThreadId,
                 ThresholdMs = thresholdMs, SummarySeconds = summarySeconds, ProfileSeconds = profileSeconds, SpikeContributors = spikeTop,
+                MaxSlowRowsPerMinute = maxSlowRowsPerMinute,
             });
             Frame(); // the first call only sets the clocks
         }
@@ -87,6 +88,8 @@ namespace PerformanceLog.Tests
             yield return ("Probe: session counts (speed mix, slow frames with a collection) add up", SessionStatsAdd);
             yield return ("Probe: the last colony and memory readings carry over frames and windows", HeavyReadingsPersist);
             yield return ("Probe: every summary window is remembered for the view over time", WindowsAreKept);
+            yield return ("Probe: a game that is slow all the time writes a limited number of slow-frame rows a minute", SlowRowsAreLimited);
+            yield return ("Probe: a copy of the session counts does not change when the original does", StatsCloneIsIndependent);
             yield return ("Probe: measuring cost is estimated for each frame", OverheadEstimate);
             yield return ("Probe: calibration measures something and leaves the probe clean", CalibrationWorks);
             yield return ("Alloc: a counter is chosen, and a test source is followed", AllocSources);
@@ -569,6 +572,40 @@ namespace PerformanceLog.Tests
                 Near(20, first.FrameMs, .01);
                 Check(first.Frames > 0 && first.Seconds > 0.9 && first.Seconds < 1.1, "a window covers about a second: " + first.Seconds);
             }
+        }
+
+        static void SlowRowsAreLimited()
+        {
+            using (var rig = new Rig(thresholdMs: 1, maxSlowRowsPerMinute: 3))
+            {
+                int id = Profile.IdFor(ProfileKind.UpdateSingleton, "Mod.Culprit");
+                for (int i = 0; i < 10; i++)
+                {
+                    Timing t = Profile.BeginExact();
+                    rig.Advance(5);
+                    Profile.EndExact(id, t);
+                    rig.Advance(5);
+                    rig.Frame();
+                }
+                Equal(3, rig.FrameRows().Count(r => r[Columns.Type] == 'F'), "only the first three slow frames of the minute get a row");
+                Equal(3, rig.SpikeRows().Count(), "and only they get spike rows");
+                Equal(7L, Probe.Stats.SlowRowsSkipped);
+                Equal(10L, Probe.Stats.SlowFrames, "every one is still counted");
+                Equal(10, Probe.WorstFrames().Count, "and still competes for the worst frames");
+                rig.Advance(61000);
+                rig.Frame();      // a new minute
+                Equal(1, rig.FrameRows().Count(r => r[Columns.Type] == 'F'), "the limit starts again");
+                Equal(7L, Probe.Stats.SlowRowsSkipped);
+            }
+        }
+
+        static void StatsCloneIsIndependent()
+        {
+            var original = new SessionStats { SlowFrames = 3, HeapMaxMB = 900 };
+            original.SpeedFrames[3] = 10; original.SpeedMs[3] = 160;
+            SessionStats copy = original.Clone();
+            original.SlowFrames = 99; original.SpeedFrames[3] = 99; original.SpeedMs[3] = 99;
+            Equal(3L, copy.SlowFrames); Equal(10L, copy.SpeedFrames[3]); Equal(160.0, copy.SpeedMs[3]); Equal(900.0, copy.HeapMaxMB);
         }
 
         static void OverheadEstimate()

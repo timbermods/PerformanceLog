@@ -4,7 +4,7 @@ Version 0.1.0 has been tested without the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (73 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (39 checks).
+`dotnet run --project tests -c Release` (82 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (40 checks).
 
 | What | How |
 |---|---|
@@ -17,8 +17,14 @@ Version 0.1.0 has been tested without the game running. This is the honest list.
 | Every patch target exists in the installed game (1.1.2.4), has no exception filter, and takes only parameters Harmony can supply | `GameBindingTests.TargetsResolve` |
 | The singleton wrappers work on the game's own `SingletonLifecycleService` and `TickableSingletonService` (built by their real constructors, their real load and update loops run through the wrappers), including exceptions and double wrapping | `GameBindingTests` |
 | The entity bucket patch against the game's real `TickableEntityBucket`; the game splits a tick into 128 entity buckets | `GameBindingTests` |
+| The wrappers go in on the first tick and frame, once per service, so other mods' `Load` postfixes see the game's own singletons | `GameBindingTests.WrappingWaitsForTheFirstTick`, `WrappingIsOncePerService` |
+| Profile = off leaves the entity tick unpatched; an abandoned save does not block the next; the parallel tick figure is not counted twice; slow-frame rows are limited per minute; the summary is made on the writer thread | `GameBindingTests`, `CoreTests`, `WriterTests` |
 | The config file, the watch list resolution against the real game types | `GameBindingTests` |
 | The analysis tool reads what the mod writes (fixtures come from the real writer) and each finding fires on its situation and not on a healthy one | `tools/test_perflog.py`, `WriterTests.FixturesAreCurrent` |
+
+An independent read-only review of the game-facing code (looking for anything that could break the game or give wrong data, checked against the game's decompiled code and BeaverBuddies) found no
+crash or hang; what it did find (wrappers put in at `Load` time could hide singleton types from BeaverBuddies' reordering, the previous game kept alive in the menu, BeaverBuddies' deferred save read as 0 ms,
+state not reset between sessions, `Profile = off` still patching every entity tick, the summary built on the game thread, unbounded slow-frame rows) is fixed in 0.1.0.
 
 A mutation check confirmed the game-binding tests fail when a private field name the mod relies on is changed.
 
@@ -32,7 +38,12 @@ A mutation check confirmed the game-binding tests fail when a private field name
 5. **Which allocation source the runtime offers** (`GC.GetAllocatedBytesForCurrentThread` may not exist under Unity's Mono; the log falls back to the heap size and says so).
 6. **Overhead**: the estimate is computed by the mod itself, not measured against a game running without it. Compare the frame rate with the mod turned off (see the checklist).
 7. **Co-op**: alongside BeaverBuddies (which replaces the tick loop). Counting ticks by entity buckets is meant to survive that; it has not been seen to.
-8. **The mod attribution** (which DLL belongs to which mod) depends on how the game lays out mod folders.
+8. **Two small save targets may be inlined by Mono** (`GameSaver.SaveInstantlySkippingNameValidation`, `Ticker.FinishFullTick`): if so their patches never fire, and the log says `never ran`. `SaveQueued`
+   and `SaveWriter.WriteToSaveStream` cover the same saves.
+9. **`PlayerLoop.SetPlayerLoop` called while a scene loads**, and (deliberately not) at quit: the sibling mods never call it, so nothing proves it safe in this game. If the game misbehaves at load or exit with
+   this mod on, that is the first place to look; `Enabled = false` removes it.
+10. **The exact order of Harmony patches against BeaverBuddies** (this mod's scope patches use `Priority.First` / `Priority.Last`).
+11. **The mod attribution** (which DLL belongs to which mod) depends on how the game lays out mod folders.
 
 ## Five-minute check in a game
 

@@ -49,6 +49,7 @@ namespace PerformanceLog
                 {
                     int watched = Watch.Install(new HarmonyLib.Harmony(Instrumentation.HarmonyId + ".watch"), Config);
                     Log.Info("Watching " + watched + " method(s).");
+                    if (watched > 0) Instrumentation.InstalledHit[Instrumentation.HitWatch] = true;
                 }
                 Started = true;
             }

@@ -77,9 +77,17 @@ To read the game's own code (the way every patch target here was checked): `ilsp
   bodies are called by hand around the game's own classes, not applied. `GameBindingTests` does this against real `SingletonLifecycleService`, `TickableSingletonService` and
   `TickableEntityBucket` instances. `HarmonyInfo` prints whether patching works in the current environment.
 - **Singletons are timed with wrappers, not patches.** The game builds arrays of `ITickableSingleton` (inside a private struct), `IUpdatableSingleton` and so on when a scene loads; the mod
-  swaps each element for a wrapper (`TimedUpdatable`...) in a postfix on `SingletonLifecycleService.LoadAll` / `TickableSingletonService.Load`. There is no Harmony patch in the hot loop, so
+  swaps each element for a wrapper (`TimedUpdatable`...) **on the first tick and the first frame** (`Instrumentation.EnsureTickSingletonsWrapped` and friends, called from the prefixes of `TickAll`,
+  `TickSingletons`, `UpdateSingletons` and `LateUpdateSingletons`), not in a postfix on `Load`: every other mod's `Load` postfix must run first, because BeaverBuddies reorders the array by
+  `is IEarlyTickableSingleton` and a wrapper would hide the type and change tick order. The reference to the wrapped service is weak. There is no Harmony patch in the hot loop, so
   nothing depends on the runtime not inlining a method, and a mod's own patch on the singleton is inside the measurement. Entity kinds are the one place a per-call patch is unavoidable
   (`TickableEntity.Tick`), so that is sampled.
+- **Saves are timed at three hooks** (`SaveQueued`, `SaveInstantlySkippingNameValidation`, `SaveWriter.WriteToSaveStream`); whichever is entered first owns the save (`SaveTracker`), and a save open for
+  a minute is treated as abandoned (the game's save throws on an IO error and skips its postfix). BeaverBuddies defers the real save, so the `SaveWriter` hook is what times it.
+- **Nothing a session holds may outlive it**: `Session.Stop` clears `services` (its delegates reach the whole colony), the colony sampler, the mod resolver and the milestones, and `Session.Start`
+  resets the patch counters and the save tracker. Static state added later must be reset there.
+- **The summary text is made on the writer thread** (`LogWriter.SetFile(path, Func<string>)`) from a snapshot taken on the game thread; anything the producer reads must be immutable or cloned
+  (`SessionStats.Clone`).
 - **A tick is counted as 128 entity buckets** (`Probe.NoteEntityBucket`), not where a tick starts, so the count stays right when BeaverBuddies replaces `TickableBucketService.TickBuckets`.
 - **The frame boundary is the start of Unity's first player-loop phase** (`PlayerLoopTiming`), so `frameMs` includes drawing and the vsync wait. Do not move it into a game script.
 - **Sampling uses random gaps** (mean N), not every Nth call: the game calls singletons in the same order every frame, and a fixed stride can land on the same few of them forever

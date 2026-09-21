@@ -20,7 +20,7 @@ namespace PerformanceLog.Tests
         static readonly string[] assemblies =
         {
             "Timberborn.TickSystem", "Timberborn.SingletonSystem", "Timberborn.GameSaveRuntimeSystem", "Timberborn.WorldPersistence",
-            "Timberborn.WorldSerialization", "Timberborn.ThumbnailCapturing", "Timberborn.Metrics", "Timberborn.Multithreading",
+            "Timberborn.WorldSerialization", "Timberborn.ThumbnailCapturing", "Timberborn.Metrics", "Timberborn.Multithreading", "Timberborn.SaveSystem",
         };
 
         public static IEnumerable<(string, Action)> All(string managed)
@@ -37,6 +37,11 @@ namespace PerformanceLog.Tests
             yield return ("Game: loading steps are recorded by wrappers around the game's own load loops", LoadWrapping);
             yield return ("Game: the game's own TickableSingletonService runs wrapped tick singletons and parallel starts", TickServiceWrapping);
             yield return ("Game: wrapping twice does not wrap the wrappers", NoDoubleWrapping);
+            yield return ("Game: the wrappers wait for the first tick, so other mods' Load postfixes still see the game's own singletons", WrappingWaitsForTheFirstTick);
+            yield return ("Game: the wrappers go in once per service, and again for the next game", WrappingIsOncePerService);
+            yield return ("Game: Profile = off does not patch every entity tick, and only deep patches components", ProfileOffSkipsEntityPatches);
+            yield return ("Game: a save left open by an exception does not block the next one", AbandonedSaveIsForgotten);
+            yield return ("Game: the game's parallel tick figure is not added twice when a save finishes it again", ParallelTickCountedOnce);
             yield return ("Game: a wrapper passes through exceptions and still times the call", WrapperExceptions);
             yield return ("Game: a wrapper does nothing extra when the log is off", WrapperWhenOff);
             yield return ("Game: patch bodies pair up and hand the scope token from prefix to postfix", PatchBodiesPair);
@@ -210,8 +215,9 @@ namespace PerformanceLog.Tests
                 Call(service, "LoadAll");                       // the game's own code loads it: nothing is patched here
                 Equal(1, singleton.Loads); Equal(1, singleton.PostLoads); Equal(1, singleton.NonLoads); Equal(1, singleton.NonPostLoads);
 
-                // What the postfix of LoadAll does.
-                Instrumentation.LoadAllPostfix(service);
+                // What the prefixes of UpdateSingletons and LateUpdateSingletons do on the first frame.
+                Instrumentation.UpdatePrefix(service, out long firstUpdate); Instrumentation.ScopePostfix(firstUpdate);
+                Instrumentation.LateUpdatePrefix(service, out long firstLate); Instrumentation.ScopePostfix(firstLate);
                 Call(service, "UpdateAll");
                 Call(service, "LateUpdateAll");
                 Equal(1, singleton.Updates); Equal(1, singleton.Lates);
@@ -268,7 +274,7 @@ namespace PerformanceLog.Tests
                 repository.Items.Add(singleton);
                 object service = Activator.CreateInstance(TickServiceType(), repository, new AllModes(), new Metrics(), new Workers(), new Snapshots());
                 Call(service, "Load");
-                Instrumentation.TickServiceLoadPostfix(service);   // what the postfix of Load does
+                Instrumentation.TickAllPrefix(service);   // what the prefix of TickAll does on the first tick
 
                 Call(service, "TickAll");                          // FinishParallelTick, TickSingletons, StartParallelTick
                 Equal(1, singleton.Ticks); Equal(1, singleton.Parallels);
@@ -331,6 +337,133 @@ namespace PerformanceLog.Tests
             Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before, "and calling it allocates nothing");
         }
 
+        // ---- when the wrappers go in ----
+
+        static IEnumerable<object> TickSingletonsIn(object service)
+        {
+            FieldInfo field = Reflect.Field(service.GetType(), "_tickableSingletons");
+            FieldInfo inner = Reflect.Field(field.FieldType.GetGenericArguments()[0], "_tickableSingleton");
+            foreach (object item in (System.Collections.IEnumerable)field.GetValue(service)) yield return inner.GetValue(item);
+        }
+
+        static IEnumerable<IUpdatableSingleton> UpdatablesIn(object service) =>
+            (IEnumerable<IUpdatableSingleton>)Reflect.Field(service.GetType(), "_updatableSingletons").GetValue(service);
+
+        static object NewTickService(Everything singleton)
+        {
+            var repository = new Repository();
+            repository.Items.Add(singleton);
+            object service = Activator.CreateInstance(TickServiceType(), repository, new AllModes(), new Metrics(), new Workers(), new Snapshots());
+            Call(service, "Load");
+            return service;
+        }
+
+        static void WrappingWaitsForTheFirstTick()
+        {
+            Rig rig = StartRig(out Everything singleton);
+            using (rig)
+            {
+                object service = NewTickService(singleton);
+                // A postfix another mod has on Load looks at what is in the array (BeaverBuddies reorders the singletons by their type). It must
+                // see the game's own singletons, so tick order is what it would be without this mod.
+                Check(TickSingletonsIn(service).All(x => x is Everything), "after Load the array holds the game's own singletons");
+                Instrumentation.TickAllPrefix(service);
+                Check(TickSingletonsIn(service).All(x => x is TimedTickable), "after the first tick's prefix it holds wrappers");
+
+                object lifecycle = NewLifecycle(singleton);
+                Call(lifecycle, "LoadAll");
+                Check(UpdatablesIn(lifecycle).All(x => x is Everything), "the per-frame array is the game's own after LoadAll, and after this mod's LoadAll postfix");
+                Instrumentation.LoadAllPostfix(lifecycle);
+                Check(UpdatablesIn(lifecycle).All(x => x is Everything), "LoadAll's postfix does not wrap them");
+                Instrumentation.UpdatePrefix(lifecycle, out long state);
+                Instrumentation.ScopePostfix(state);
+                Check(UpdatablesIn(lifecycle).All(x => x is TimedUpdatable), "the first frame does");
+            }
+        }
+
+        static void WrappingIsOncePerService()
+        {
+            Rig rig = StartRig(out Everything singleton);
+            using (rig)
+            {
+                Instrumentation.ResetForSession();
+                object first = NewTickService(singleton);
+                Instrumentation.EnsureTickSingletonsWrapped(first);
+                long after = Instrumentation.Hits[Instrumentation.HitTickServiceLoad];
+                Equal(1L, after, "one service wrapped");
+                Instrumentation.EnsureTickSingletonsWrapped(first);
+                Equal(after, Instrumentation.Hits[Instrumentation.HitTickServiceLoad], "the same service is not looked at again");
+                object second = NewTickService(singleton);
+                Instrumentation.EnsureTickSingletonsWrapped(second);
+                Equal(after + 1, Instrumentation.Hits[Instrumentation.HitTickServiceLoad], "the next game's service is");
+                Check(TickSingletonsIn(second).All(x => x is TimedTickable));
+                Instrumentation.EnsureTickSingletonsWrapped(null);   // nothing to wrap: must not throw
+                Instrumentation.ResetForSession();
+                Equal(0L, Instrumentation.Hits[Instrumentation.HitTickServiceLoad], "a new session starts counting from zero");
+            }
+        }
+
+        static void ProfileOffSkipsEntityPatches()
+        {
+            var standard = Instrumentation.CreateSpecs(false, true).Select(x => x.Name).ToList();
+            var off = Instrumentation.CreateSpecs(false, false).Select(x => x.Name).ToList();
+            var deep = Instrumentation.CreateSpecs(true, true).Select(x => x.Name).ToList();
+            var deepButOff = Instrumentation.CreateSpecs(true, false).Select(x => x.Name).ToList();
+            Check(standard.Contains("TickableEntity.Tick") && !standard.Contains("MeteredTickableComponent.Tick"));
+            Check(!off.Contains("TickableEntity.Tick") && !off.Contains("MeteredTickableComponent.Tick"), "Profile = off leaves the hottest method of the game alone");
+            Check(deep.Contains("TickableEntity.Tick") && deep.Contains("MeteredTickableComponent.Tick"));
+            Check(!deepButOff.Contains("TickableEntity.Tick") && !deepButOff.Contains("MeteredTickableComponent.Tick"));
+            Check(off.Contains("Ticker.Update") && off.Contains("TickableEntityBucket.TickAll"), "the frame and tick timing stay");
+            Check(off.Contains("SaveWriter.WriteToSaveStream"), "and so does the save that another mod runs later than SaveQueued");
+        }
+
+        static void AbandonedSaveIsForgotten()
+        {
+            SaveTracker.Abandon();
+            Check(SaveTracker.TryOpen("first"));
+            Check(!SaveTracker.TryOpen("nested"), "an open save owns the tracking");
+            long later = System.Diagnostics.Stopwatch.GetTimestamp() + (long)(SaveTracker.AbandonedAfterSeconds * 2 * System.Diagnostics.Stopwatch.Frequency);
+            Check(SaveTracker.TryOpen("after the exception", later), "a save open for a minute was abandoned by an exception, so the next one is tracked");
+            SaveTracker.Abandon();
+            Check(!SaveTracker.IsOpen);
+        }
+
+        sealed class FakeTickService : ITickableSingletonService
+        {
+            public TimeSpan Duration;
+            public TimeSpan LastParallelTickDuration => Duration;
+            public bool ParalleTicklIsFinished => true;
+            public bool IsStartingParallelTick => false;
+            public event EventHandler ForcedParallelTickFinished { add { } remove { } }
+            public void TickAll() { }
+            public void ForceFinishParallelTick() { }
+        }
+
+        static void ParallelTickCountedOnce()
+        {
+            using (var rig = new Rig(thresholdMs: 1))
+            {
+                Instrumentation.ResetForSession();
+                var service = new FakeTickService { Duration = TimeSpan.FromMilliseconds(7.5) };
+                for (int i = 0; i < 3; i++)   // a tick's own finish, then the forced finishes of a save
+                {
+                    Instrumentation.FinishParallelPrefix(out long state);
+                    rig.Advance(1);
+                    Instrumentation.FinishParallelPostfix(service, state);
+                }
+                rig.Advance(50);
+                rig.Frame();
+                double[] row = rig.FrameRows().Single(r => r[Columns.Type] == 'F');
+                Near(7.5, row[Columns.ParTickMs], .01, "the game's figure once, not three times");
+                service.Duration = TimeSpan.FromMilliseconds(3);
+                Instrumentation.FinishParallelPrefix(out long next);
+                Instrumentation.FinishParallelPostfix(service, next);
+                rig.Advance(50);
+                rig.Frame();
+                Near(3.0, rig.FrameRows().Single(r => r[Columns.Type] == 'F')[Columns.ParTickMs], .01, "a new figure is added");
+            }
+        }
+
         // ---- patch bodies ----
 
         static void PatchBodiesPair()
@@ -340,7 +473,7 @@ namespace PerformanceLog.Tests
             {
                 Instrumentation.TickerPrefix(out long tick);
                 Check(tick != 0, "the scope opened");
-                Instrumentation.UpdatePrefix(out long update);
+                Instrumentation.UpdatePrefix(null, out long update);
                 rig.Advance(4);
                 Instrumentation.ScopePostfix(update);
                 rig.Advance(6);
@@ -444,7 +577,7 @@ namespace PerformanceLog.Tests
                 "# a comment",
                 "Enabled = true   # trailing comment",
                 "SlowFrameMs=33.5", "SummarySeconds = 0", "ProfileSeconds=100000", "Profile = DEEP", "SpikeContributors = 99",
-                "OverheadBudgetPercent = 1", "OutputFolder = D:\\logs",
+                "OverheadBudgetPercent = 1", "OutputFolder = D:\\logs", "MaxSlowRowsPerMinute = 5",
                 "Watch = A.B.C; D.E.F",
                 "Watch = G.H.I",
                 "no equals sign", "=novalue",
@@ -457,6 +590,7 @@ namespace PerformanceLog.Tests
             Equal(Profile.TopK, config.SpikeContributors);
             Equal(1.0, config.OverheadBudgetPercent);
             Equal("D:\\logs", config.OutputFolder);
+            Equal(10, config.MaxSlowRowsPerMinute);   // clamped up
             Check(config.Watch.SequenceEqual(new[] { "A.B.C", "D.E.F", "G.H.I" }), "Watch may repeat and use ;");
             Equal(0, config.Problems.Count);
             var off = new Config();

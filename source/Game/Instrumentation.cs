@@ -34,17 +34,19 @@ namespace PerformanceLog
         // Indexes into Hits, one for each patch, for the capability lines at the end of a log.
         internal const int HitTicker = 0, HitTickAll = 1, HitFinishParallel = 2, HitTickSingletons = 3, HitStartParallel = 4, HitEntityBucket = 5, HitEntity = 6,
             HitComponent = 7, HitUpdate = 8, HitLateUpdate = 9, HitLoadAll = 10, HitLoadPhase = 11, HitTickServiceLoad = 12, HitSaveQueued = 13,
-            HitSaveInstant = 14, HitSaveStage = 15, HitWatch = 16, HitCount = 17;
+            HitSaveInstant = 14, HitSaveStage = 15, HitWatch = 16, HitSaveWriter = 17, HitCount = 18;
 
         internal static readonly long[] Hits = new long[HitCount];
+        /// <summary>Which patches were actually made, so a log can say "not installed" instead of "never ran".</summary>
+        internal static readonly bool[] InstalledHit = new bool[HitCount];
 
         static readonly string[] hitNames =
         {
             "Ticker.Update", "TickableSingletonService.TickAll", "TickableSingletonService.FinishParallelTick", "TickableSingletonService.TickSingletons",
-            "TickableSingletonService.StartParallelTick", "TickableEntityBucket.TickAll", "TickableEntity.Tick", "MeteredTickableComponent.Tick",
+            "TickableSingletonService.StartParallelTick", "TickableEntityBucket.TickAll", "TickableEntity.Tick (sampled calls)", "MeteredTickableComponent.Tick (sampled calls)",
             "SingletonLifecycleService.UpdateSingletons", "SingletonLifecycleService.LateUpdateSingletons", "SingletonLifecycleService.LoadAll",
-            "SingletonLifecycleService load phases", "TickableSingletonService.Load", "GameSaver.SaveQueued", "GameSaver.SaveInstantlySkippingNameValidation",
-            "save stages", "watched methods",
+            "SingletonLifecycleService load phases", "singleton wrappers put in place", "GameSaver.SaveQueued", "GameSaver.SaveInstantlySkippingNameValidation",
+            "save stages", "watched methods (sampled calls)", "SaveWriter.WriteToSaveStream",
         };
 
         public static string HitName(int index) => hitNames[index];
@@ -65,7 +67,7 @@ namespace PerformanceLog
 
         // ---- what is patched ----
 
-        internal static List<PatchSpec> CreateSpecs(bool deep)
+        internal static List<PatchSpec> CreateSpecs(bool deep, bool entities = true)
         {
             Type self = typeof(Instrumentation);
             var specs = new List<PatchSpec>
@@ -120,13 +122,6 @@ namespace PerformanceLog
                 },
                 new PatchSpec
                 {
-                    Name = "TickableSingletonService.Load", Required = false, Hit = HitTickServiceLoad,
-                    Purpose = "times each once-per-tick and parallel singleton",
-                    Target = () => Reflect.Method("Timberborn.TickSystem.TickableSingletonService", "Load"),
-                    Postfix = Reflect.Own(self, nameof(TickServiceLoadPostfix)),
-                },
-                new PatchSpec
-                {
                     Name = "SingletonLifecycleService.UpdateSingletons", Required = false, Scope = true, Hit = HitUpdate,
                     Purpose = "updMs: the per-frame singleton updates",
                     Target = () => Reflect.Method("Timberborn.SingletonSystem.SingletonLifecycleService", "UpdateSingletons"),
@@ -142,7 +137,7 @@ namespace PerformanceLog
                 new PatchSpec
                 {
                     Name = "SingletonLifecycleService.LoadAll", Required = false, Hit = HitLoadAll,
-                    Purpose = "times loading, and times each per-frame singleton",
+                    Purpose = "times loading",
                     Target = () => Reflect.Method("Timberborn.SingletonSystem.SingletonLifecycleService", "LoadAll"),
                     Prefix = Reflect.Own(self, nameof(LoadAllPrefix)), Postfix = Reflect.Own(self, nameof(LoadAllPostfix)),
                 },
@@ -158,7 +153,7 @@ namespace PerformanceLog
                     Prefix = Reflect.Own(self, nameof(LoadPhasePrefix)), Postfix = Reflect.Own(self, nameof(LoadPhasePostfix)),
                 });
             }
-            specs.Add(new PatchSpec
+            if (entities) specs.Add(new PatchSpec
             {
                 Name = "TickableEntity.Tick", Required = false, Hit = HitEntity,
                 Purpose = "profile.csv: which kinds of entity the tick's time goes to (sampled)",
@@ -189,6 +184,15 @@ namespace PerformanceLog
                 Target = () => Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "SaveInstantlySkippingNameValidation"),
                 Prefix = Reflect.Own(self, nameof(SaveInstantPrefix)), Postfix = Reflect.Own(self, nameof(SavePostfix)),
             });
+            // A mod that runs the game's save itself (BeaverBuddies defers it to the end of a tick) returns from SaveQueued at once, so the time of
+            // the save is only visible where the world is written. Whichever hook is entered first owns the save.
+            specs.Add(new PatchSpec
+            {
+                Name = "SaveWriter.WriteToSaveStream", Required = false, Scope = true, Hit = HitSaveWriter,
+                Purpose = "saveMs: a save that another mod runs later than SaveQueued does",
+                Target = () => Reflect.Method("Timberborn.SaveSystem.SaveWriter", "WriteToSaveStream"),
+                Prefix = Reflect.Own(self, nameof(SaveWriterPrefix)), Postfix = Reflect.Own(self, nameof(SavePostfix)),
+            });
             // Two hooks for the first stage: the one on Ticker is so short that the runtime may inline it, and the one on the bucket
             // service is called through an interface. Whichever is entered first counts; the one nested inside it does not.
             AddStage(specs, "Ticker.FinishFullTick", 0, () => Reflect.Method("Timberborn.TickSystem.Ticker", "FinishFullTick"));
@@ -200,7 +204,7 @@ namespace PerformanceLog
             });
             AddStage(specs, "WorldSerializer.WriteToSaveEntryStream", 2, () => Reflect.Method("Timberborn.WorldSerialization.WorldSerializer", "WriteToSaveEntryStream"));
             AddStage(specs, "ThumbnailSaveEntryWriter.WriteToSaveEntryStream", 3, () => Reflect.Method("Timberborn.ThumbnailCapturing.ThumbnailSaveEntryWriter", "WriteToSaveEntryStream"));
-            if (deep)
+            if (deep && entities)
             {
                 specs.Add(new PatchSpec
                 {
@@ -248,8 +252,9 @@ namespace PerformanceLog
         {
             Results.Clear(); Installed = 0; Failed = 0;
             harmony = new Harmony(HarmonyId);
-            foreach (PatchSpec spec in CreateSpecs(config.Deep))
+            foreach (PatchSpec spec in CreateSpecs(config.Deep, config.SamplesEntities))
                 InstallOne(spec);
+            InstalledHit[HitTickServiceLoad] = true; // the wrappers are put in place by the patches above, on the first tick and frame
             MeasurePatchCost();
             Log.Info("Patches: " + Installed + " installed, " + Failed + " could not be made.");
         }
@@ -265,6 +270,7 @@ namespace PerformanceLog
                 HarmonyMethod postfix = spec.Postfix == null ? null : new HarmonyMethod(spec.Postfix) { priority = spec.Scope ? Priority.Last : Priority.Normal };
                 harmony.Patch(target, prefix, postfix);
                 Installed++;
+                InstalledHit[spec.Hit] = true;
                 Results.Add(spec.Name + "|installed|" + spec.Purpose);
             }
             catch (Exception e)
@@ -311,6 +317,8 @@ namespace PerformanceLog
             __state = 0;
             if (!Probe.Enabled) return;
             Hits[HitTicker]++;
+            // If another mod replaced Unity's player loop, the frame markers are gone and no frame would ever be closed: notice, and try once more.
+            if (Probe.FrameNumber == 0) Session.CheckFramesArriving();
             __state = Probe.Begin(Slot.Tick);
         }
 
@@ -319,10 +327,11 @@ namespace PerformanceLog
             if (__state != 0) Probe.End(__state);
         }
 
-        internal static void TickAllPrefix()
+        internal static void TickAllPrefix(object __instance)
         {
             if (!Probe.Enabled) return;
             Hits[HitTickAll]++;
+            EnsureTickSingletonsWrapped(__instance);
             Probe.NoteBucket();
         }
 
@@ -338,15 +347,27 @@ namespace PerformanceLog
         {
             if (__state == 0) return;
             Probe.End(__state);
-            try { Probe.NoteParallelTick(((ITickableSingletonService)__instance).LastParallelTickDuration.TotalMilliseconds); }
+            try
+            {
+                // The game's figure only changes when a parallel tick finishes; a forced finish (during a save) would otherwise add it again.
+                TimeSpan duration = ((ITickableSingletonService)__instance).LastParallelTickDuration;
+                if (duration != lastParallelTick)
+                {
+                    lastParallelTick = duration;
+                    Probe.NoteParallelTick(duration.TotalMilliseconds);
+                }
+            }
             catch (Exception) { }
         }
 
-        internal static void TickSingletonsPrefix(out long __state)
+        static TimeSpan lastParallelTick;
+
+        internal static void TickSingletonsPrefix(object __instance, out long __state)
         {
             __state = 0;
             if (!Probe.Enabled) return;
             Hits[HitTickSingletons]++;
+            EnsureTickSingletonsWrapped(__instance);
             __state = Probe.Begin(Slot.Singletons);
         }
 
@@ -373,7 +394,6 @@ namespace PerformanceLog
         internal static void EntityPrefix(out Sample __state)
         {
             if (!Probe.Enabled) { __state = default; return; }
-            Hits[HitEntity]++;
             Probe.Count(Counter.PatchCalls);
             __state = Profile.BeginEntity();
         }
@@ -381,6 +401,7 @@ namespace PerformanceLog
         internal static void EntityPostfix(object __instance, Sample __state)
         {
             if (!__state.On) return;
+            Hits[HitEntity]++;
             string name = null;
             try { name = entityName(__instance); }
             catch (Exception) { }
@@ -390,7 +411,6 @@ namespace PerformanceLog
         internal static void ComponentPrefix(out Sample __state)
         {
             if (!Probe.Enabled) { __state = default; return; }
-            Hits[HitComponent]++;
             Probe.Count(Counter.PatchCalls);
             __state = Profile.BeginComponent();
         }
@@ -398,39 +418,81 @@ namespace PerformanceLog
         internal static void ComponentPostfix(object __instance, Sample __state)
         {
             if (!__state.On) return;
+            Hits[HitComponent]++;
             Type type = null;
             try { type = componentOf(__instance)?.GetType(); }
             catch (Exception) { }
             Profile.EndComponent(type, __state);
         }
 
-        internal static void UpdatePrefix(out long __state)
+        internal static void UpdatePrefix(object __instance, out long __state)
         {
             __state = 0;
             if (!Probe.Enabled) return;
             Hits[HitUpdate]++;
+            EnsureUpdatableWrapped(__instance);
             __state = Probe.Begin(Slot.Update);
         }
 
-        internal static void LateUpdatePrefix(out long __state)
+        internal static void LateUpdatePrefix(object __instance, out long __state)
         {
             __state = 0;
             if (!Probe.Enabled) return;
             Hits[HitLateUpdate]++;
+            EnsureLateUpdatableWrapped(__instance);
             __state = Probe.Begin(Slot.LateUpdate);
         }
 
         // ---- loading and the per-frame arrays ----
 
-        internal static void TickServiceLoadPostfix(object __instance)
+        // The wrappers are put into the game's arrays on the first tick and the first frame, not when a scene loads. By then every other mod's postfix on
+        // Load has run, so a mod that looks at what is in those arrays (BeaverBuddies reorders the once-per-tick singletons by their type) still sees the
+        // game's own singletons, and tick order is what it would be without this mod. Once per service, and the reference is weak so an old game is not kept alive.
+        static readonly WeakReference tickWrapped = new WeakReference(null), updateWrapped = new WeakReference(null), lateWrapped = new WeakReference(null);
+
+        internal static void EnsureTickSingletonsWrapped(object service)
         {
+            if (service == null || ReferenceEquals(tickWrapped.Target, service)) return;
+            tickWrapped.Target = service;
             try
             {
-                SingletonArrays.SwapTickSingletons(__instance);
-                SingletonArrays.Swap<IParallelTickableSingleton>(__instance, "_parallelTickableSingletons", x => new TimedParallelStart(x));
+                SingletonArrays.SwapTickSingletons(service);
+                SingletonArrays.Swap<IParallelTickableSingleton>(service, "_parallelTickableSingletons", x => new TimedParallelStart(x));
                 Hits[HitTickServiceLoad]++;
             }
             catch (Exception e) { Log.Warning("Could not time the singletons that tick: " + e.Message); }
+        }
+
+        internal static void EnsureUpdatableWrapped(object service)
+        {
+            if (service == null || ReferenceEquals(updateWrapped.Target, service)) return;
+            updateWrapped.Target = service;
+            try
+            {
+                SingletonArrays.Swap<IUpdatableSingleton>(service, "_updatableSingletons", x => new TimedUpdatable(x));
+                Hits[HitTickServiceLoad]++;
+            }
+            catch (Exception e) { Log.Warning("Could not time the singletons that update every frame: " + e.Message); }
+        }
+
+        internal static void EnsureLateUpdatableWrapped(object service)
+        {
+            if (service == null || ReferenceEquals(lateWrapped.Target, service)) return;
+            lateWrapped.Target = service;
+            try
+            {
+                SingletonArrays.Swap<ILateUpdatableSingleton>(service, "_lateUpdatableSingletons", x => new TimedLateUpdatable(x));
+                Hits[HitTickServiceLoad]++;
+            }
+            catch (Exception e) { Log.Warning("Could not time the singletons that update late every frame: " + e.Message); }
+        }
+
+        /// <summary>Forgets what the last session counted. Called when a session starts.</summary>
+        internal static void ResetForSession()
+        {
+            Array.Clear(Hits, 0, Hits.Length);
+            lastParallelTick = default;
+            SaveTracker.Abandon();
         }
 
         internal static void LoadAllPrefix()
@@ -446,12 +508,6 @@ namespace PerformanceLog
 
         internal static void LoadAllPostfix(object __instance)
         {
-            try
-            {
-                SingletonArrays.Swap<IUpdatableSingleton>(__instance, "_updatableSingletons", x => new TimedUpdatable(x));
-                SingletonArrays.Swap<ILateUpdatableSingleton>(__instance, "_lateUpdatableSingletons", x => new TimedLateUpdatable(x));
-            }
-            catch (Exception e) { Log.Warning("Could not time the singletons that update every frame: " + e.Message); }
             try
             {
                 LoadRecorder.End();
@@ -499,6 +555,20 @@ namespace PerformanceLog
                 if (queuedSaveOf(__instance) == null) return; // nothing queued: this is called every frame
                 if (!SaveTracker.TryOpen("queued save")) return;
                 Hits[HitSaveQueued]++;
+                __state = Probe.Begin(Slot.Save);
+                if (__state == 0) SaveTracker.Abandon();
+            }
+            catch (Exception) { }
+        }
+
+        internal static void SaveWriterPrefix(out long __state)
+        {
+            __state = 0;
+            if (!Probe.Enabled) return;
+            try
+            {
+                if (!SaveTracker.TryOpen("save (writing the world)")) return; // an outer hook already owns this save
+                Hits[HitSaveWriter]++;
                 __state = Probe.Begin(Slot.Save);
                 if (__state == 0) SaveTracker.Abandon();
             }

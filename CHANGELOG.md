@@ -12,4 +12,6 @@ First release. A standalone mod that records where a Timberborn session's time a
 - Saves with their stages, and loading: the time of every singleton's `Load` and `PostLoad`.
 - The computer, game and settings, every enabled mod with its version, which mod patches which hot method, what each measurement source could do, and what measuring costs.
 - Each session folder holds `summary.md` (one page, refreshed every minute), `README.md` (how to read and diagnose), `columns.md`, `frames.csv`, `profile.csv`, `spikes.csv` and `events.csv`.
+- Made to coexist with BeaverBuddies: timing wrappers go into the game's singleton arrays on the first tick and frame (after every other mod's `Load` patches), the deferred save is timed where the world is written, and ticks are counted by entity buckets.
+- Nothing a finished session held stays alive in the menu; slow-frame rows are limited per minute (`MaxSlowRowsPerMinute`); the summary text is made on the writer thread; `Profile = off` leaves the entity tick unpatched.
 - `tools/perflog.py`: `report` (findings with evidence and next steps), `compare` (two sessions, with what else differed), `list`. Standard library only.

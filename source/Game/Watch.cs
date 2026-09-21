@@ -111,7 +111,6 @@ namespace PerformanceLog
             __state = default;
             if (!Probe.Enabled || !Probe.OnGameThread) return;
             if (!ids.TryGetValue(__originalMethod, out int id)) return;
-            Instrumentation.Hits[Instrumentation.HitWatch]++;
             Probe.Count(Counter.PatchCalls);
             __state = Profile.BeginMethod(id);
         }
@@ -119,6 +118,7 @@ namespace PerformanceLog
         static void WatchPostfix(MethodBase __originalMethod, Sample __state)
         {
             if (!__state.On) return;
+            Instrumentation.Hits[Instrumentation.HitWatch]++;
             if (ids.TryGetValue(__originalMethod, out int id)) Profile.EndMethod(id, __state);
         }
     }

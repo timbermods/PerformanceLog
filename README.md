@@ -72,26 +72,35 @@ a game is slow. Nothing here changes what the game simulates, so co-op players m
 | `SlowFrameMs` | `50` | A frame this long gets its own row in `frames.csv`. |
 | `SummarySeconds` | `10` | How often a summary row is written. |
 | `ProfileSeconds` | `30` | How often `profile.csv` is written. |
-| `Profile` | `standard` | `off`, `standard` or `deep` (also samples every entity component). |
+| `Profile` | `standard` | `off` (no patch on the entity tick at all), `standard` or `deep` (also samples every entity component). |
 | `OverheadBudgetPercent` | `0.5` | How much of a second the sampling may spend measuring; it widens the sampling on its own when there are many entities. |
 | `SpikeContributors` | `5` | How many of the biggest contributors to each slow frame are written to `spikes.csv`. |
+| `MaxSlowRowsPerMinute` | `300` | At most this many slow frames get a row a minute; the rest are only counted, so a game that is slow all the time cannot fill the disk. |
 | `OutputFolder` | *(empty)* | Where session folders go. Empty = `Documents\Timberborn\PerformanceLog`. |
 | `Watch` | *(none)* | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like. Rows appear in `profile.csv` as kind `method`. |
 
 To measure another mod's method, for example:
 
 ```
-Watch = LateGamePerformance.HaulCache.Rebuild; LateGamePerformance.RouteMaps.Apply
+Watch = LateGamePerformance.HaulCache.OnTickStarted; LateGamePerformance.MetricsDump.OnTickStarted
 ```
 
-The mod must be enabled so its type can be found. Methods with a `catch ... when` clause are refused (Harmony cannot patch them under Mono and the
+The mod must be enabled so its type can be found. Every call of a watched method pays for a Harmony wrapper and a lookup even when it is not timed, so watching a method that runs thousands of times a tick costs
+more than watching a rare one; the cost is in `overheadUs`. Methods with a `catch ... when` clause are refused (Harmony cannot patch them under Mono and the
 attempt can crash the game) and the log says so.
+
+## Working with other mods
+
+The mod puts a timing wrapper in front of each of the game's singletons, but only on the first tick and first frame of a game, after every other mod's `Load` patches have run, so a mod that looks at
+those singletons (BeaverBuddies reorders the once-per-tick ones by their type) still sees the game's own and tick order is what it would be without this mod. It never replaces a game method and
+never skips the original. When another mod defers the game's save to the end of a tick (BeaverBuddies does), the `queued save` event reads about 0 ms and the real one is the `save (writing the world)`
+event.
 
 ## What it costs, and what it cannot see
 
 It aims to stay small, and it measures itself: `overheadUs` (the estimate of the timers, samples and patches in a frame) and `probeUs` (closing the frame) are
-in every row, the calibration is in the header, and `summary.md` warns if the total is more than 2% of a frame. With logging off the patches cost one flag
-read each. The per-frame path allocates nothing (a test checks this), rows go into buffers allocated once, and a thread of its own writes the files twice a
+in every row, the calibration is in the header, and `summary.md` warns if the total is more than 2% of a frame. While no log is running (in a menu, say) each patch costs one flag
+read. The per-frame path allocates nothing (a test checks this), rows go into buffers allocated once, and a thread of its own writes the files twice a
 second, so no disk work happens on the frame being measured.
 
 It cannot see inside the parallel tick (the worker threads), only the game thread's wait for it. It cannot see mods that hook the game without Harmony (MonoMod,

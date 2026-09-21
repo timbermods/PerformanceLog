@@ -48,6 +48,7 @@ namespace PerformanceLog
         {
             public string Path;
             public volatile string Pending;
+            public volatile Func<string> PendingProducer;
             public string Written;
         }
 
@@ -89,7 +90,17 @@ namespace PerformanceLog
         public void SetFile(string path, string content)
         {
             foreach (FileOutput f in files)
-                if (f.Path == path) { f.Pending = content; return; }
+                if (f.Path == path) { f.PendingProducer = null; f.Pending = content; return; }
+        }
+
+        /// <summary>
+        /// Like <see cref="SetFile(string,string)"/>, but the text is made on the writer thread, so building a big report costs the game thread
+        /// nothing. The producer must only read data that is safe to read from another thread (a snapshot).
+        /// </summary>
+        public void SetFile(string path, Func<string> producer)
+        {
+            foreach (FileOutput f in files)
+                if (f.Path == path) { f.Pending = null; f.PendingProducer = producer; return; }
         }
 
         /// <summary>Opens the files and starts writing. False, with <see cref="Failure"/> set, if none could be opened.</summary>
@@ -145,7 +156,7 @@ namespace PerformanceLog
             stopping = true;
             wake.Set();
             Thread t = thread;
-            if (t != null && !t.Join(3000)) Failure = Failure ?? "The writer did not finish in time.";
+            if (t != null && !t.Join(2000)) Failure = Failure ?? "The writer did not finish in time.";
             thread = null;
         }
 
@@ -207,6 +218,13 @@ namespace PerformanceLog
             }
             foreach (FileOutput f in files)
             {
+                Func<string> producer = f.PendingProducer;
+                if (producer != null)
+                {
+                    f.PendingProducer = null;
+                    try { f.Pending = producer(); }
+                    catch (Exception e) { Failure = Failure ?? (Path.GetFileName(f.Path) + ": " + e.Message); continue; }
+                }
                 string content = f.Pending;
                 if (content == null || ReferenceEquals(content, f.Written)) continue;
                 try

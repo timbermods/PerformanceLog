@@ -21,6 +21,7 @@ namespace PerformanceLog
         public string Profile = ProfileStandard;
         public double OverheadBudgetPercent = 0.5;
         public int SpikeContributors = 5;
+        public int MaxSlowRowsPerMinute = 300;
         public string OutputFolder = "";
         public readonly List<string> Watch = new List<string>();
 
@@ -79,6 +80,7 @@ namespace PerformanceLog
                     case "profileseconds": ProfileSeconds = Clamp(Number(key, value, ProfileSeconds), 5, 1800); break;
                     case "overheadbudgetpercent": OverheadBudgetPercent = Clamp(Number(key, value, OverheadBudgetPercent), 0.05, 5); break;
                     case "spikecontributors": SpikeContributors = (int)Clamp(Number(key, value, SpikeContributors), 0, PerformanceLog.Profile.TopK); break;
+                    case "maxslowrowsperminute": MaxSlowRowsPerMinute = (int)Clamp(Number(key, value, MaxSlowRowsPerMinute), 10, 6000); break;
                     case "outputfolder": OutputFolder = value; break;
                     case "profile":
                         string level = value.ToLowerInvariant();
@@ -120,7 +122,7 @@ namespace PerformanceLog
         public override string ToString() =>
             "Enabled=" + Enabled + ", Profile=" + Profile + ", SlowFrameMs=" + SlowFrameMs.ToString(CultureInfo.InvariantCulture) +
             ", SummarySeconds=" + SummarySeconds.ToString(CultureInfo.InvariantCulture) + ", ProfileSeconds=" + ProfileSeconds.ToString(CultureInfo.InvariantCulture) +
-            ", OverheadBudgetPercent=" + OverheadBudgetPercent.ToString(CultureInfo.InvariantCulture) + ", SpikeContributors=" + SpikeContributors +
+            ", OverheadBudgetPercent=" + OverheadBudgetPercent.ToString(CultureInfo.InvariantCulture) + ", SpikeContributors=" + SpikeContributors + ", MaxSlowRowsPerMinute=" + MaxSlowRowsPerMinute +
             ", Watch=" + (Watch.Count == 0 ? "(none)" : string.Join(";", Watch));
     }
 }

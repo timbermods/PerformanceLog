@@ -70,7 +70,8 @@ Start by writing down what the complaint is, because the causes differ:
      slow part is on the workers (pathfinding, water and so on), which this mod cannot see into; `parallel-start` rows show only the scheduling.
    - `tickMs` itself (the tick loop minus its parts) is large when other mods patch the tick loop. Check the `# patch|` lines for `Ticker.Update` and
      `TickableBucketService.TickBuckets`.
-4. **`saveMs`**: the game saving. `events.csv` has each save with its stages.
+4. **`saveMs`**: the game saving. `events.csv` has each save with its stages. (A mod that defers the save to the end of a tick, such as BeaverBuddies, makes the `queued save` event read about 0 ms; the
+   `save (writing the world)` event is the real one.)
 5. **Garbage collection**: `gcDelta` > 0 in slow frames; a sawtooth `heapMB`; large allocation per tick (`tickKB`, `singKB`, `entKB`, and `allocKB` per
    second in `summary.md`). Long collection pauses on one computer and not another point at settings (`# gc|`, `# bootconfig|` for
    `gc-max-time-slice`, `# cmdline|`). Which singleton or entity kind allocates the most is in `profile.csv` (`allocKB`).

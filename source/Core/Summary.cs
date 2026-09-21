@@ -112,6 +112,8 @@ namespace PerformanceLog
                 .Append(" of frames, ").Append(Pct(st.SlowMs, totalMs)).Append(" of all frame time). Among them: ")
                 .Append(st.SlowGcFrames).Append(" contained a garbage collection, ").Append(st.SlowSaveFrames).Append(" a save, ")
                 .Append(st.SlowUnfocusedFrames).Append(" were with the window in the background, ").Append(st.SlowPausedFrames).Append(" were with the game paused.\n");
+            if (st.SlowRowsSkipped > 0)
+                t.Append("- **").Append(st.SlowRowsSkipped).Append("** of those slow frames have no row of their own in `frames.csv`: the log writes at most a fixed number of slow-frame rows a minute (`MaxSlowRowsPerMinute` in the config) so a game that is slow all the time cannot fill the disk. They are counted here and in every summary row.\n");
             t.Append("- The very first frame after the log started took ").Append(F(st.FirstFrameMs, 0)).Append(" ms (start-up cost, not gameplay).\n\n");
 
             t.Append("| Game speed | Frames | Share | Mean frame time |\n|---|---|---|---|\n");

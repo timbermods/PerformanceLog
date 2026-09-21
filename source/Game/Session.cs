@@ -39,6 +39,10 @@ namespace PerformanceLog
         static long nextSummaryRefresh;
         static bool quittingHooked;
         static double[] lastColony;
+        static List<KeyValuePair<string, string>> environment;
+        static List<string[]> modList;
+        static long startedTicks;
+        static bool markersRetried;
         static List<string> finalLines = new List<string>();
         static readonly List<string> warnings = new List<string>();
 
@@ -57,6 +61,10 @@ namespace PerformanceLog
             {
                 Milestones.Mark("session-start");
                 warnings.Clear(); finalLines = new List<string>(); lastColony = null;
+                Instrumentation.ResetForSession();
+                // What does not change during a session is read once, so refreshing the summary does not have to ask the system again.
+                environment = EnvironmentInfo.Collect();
+                modList = services.Mods != null ? EnvironmentInfo.Mods(services.Mods) : new List<string[]>();
                 string root = string.IsNullOrWhiteSpace(cfg.OutputFolder) ? Path.Combine(UserDataFolder.Folder, "PerformanceLog") : cfg.OutputFolder;
                 DateTime now = DateTime.Now;
                 sessionName = now.ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);
@@ -75,6 +83,7 @@ namespace PerformanceLog
                 UnityExtras.Start();
                 UnityExtras.ColonySampler = SampleColony;
                 PlayerLoopTiming.Install();
+                startedTicks = Stopwatch.GetTimestamp(); markersRetried = false;
 
                 var frames = new Ring(Columns.Count, FrameRingRows);
                 var profile = new Ring(Profile.Table.Count, ProfileRingRows);
@@ -107,6 +116,7 @@ namespace PerformanceLog
                 {
                     Frames = frames, Profile = profile, Spikes = spikes, GameThreadId = Thread.CurrentThread.ManagedThreadId,
                     ThresholdMs = cfg.SlowFrameMs, SummarySeconds = cfg.SummarySeconds, ProfileSeconds = cfg.ProfileSeconds, SpikeContributors = cfg.SpikeContributors,
+                    MaxSlowRowsPerMinute = cfg.MaxSlowRowsPerMinute,
                 });
                 Watch.OnSessionStart();
                 started = true;
@@ -120,7 +130,7 @@ namespace PerformanceLog
                 if (!quittingHooked)
                 {
                     quittingHooked = true;
-                    Application.quitting += () => Stop("the game was closed");
+                    Application.quitting += () => Stop("the game was closed", quitting: true);
                 }
                 Log.Info("Recording to " + folder);
             }
@@ -169,7 +179,7 @@ namespace PerformanceLog
             header.Add("session", sessionName);
             header.Add("started", startedLocal);
             header.Add("mod", modVersion);
-            foreach (var pair in EnvironmentInfo.Collect()) header.Add(pair.Key, pair.Value);
+            foreach (var pair in environment) header.Add(pair.Key, pair.Value);
             header.Add("profile", config.Profile);
             header.Add("thresholdMs", config.SlowFrameMs.ToString(CultureInfo.InvariantCulture));
             header.Add("summarySeconds", config.SummarySeconds.ToString(CultureInfo.InvariantCulture));
@@ -204,7 +214,7 @@ namespace PerformanceLog
             header.Append(Milestones.Lines());
             foreach (string line in EnvironmentInfo.BootConfig()) header.Pipe("bootconfig", line);
             foreach (string arg in EnvironmentInfo.CommandLine()) header.Pipe("cmdline", arg);
-            List<string[]> mods = services.Mods != null ? EnvironmentInfo.Mods(services.Mods) : new List<string[]>();
+            List<string[]> mods = modList;
             header.Add("mods", mods.Count.ToString(CultureInfo.InvariantCulture));
             foreach (string[] mod in mods.OrderBy(m => m[0], StringComparer.Ordinal)) header.Mod(mod[0], mod[1], mod[2]);
             var patches = new List<string>();
@@ -309,7 +319,9 @@ namespace PerformanceLog
             try
             {
                 if (writer == null) return;
-                writer.SetFile(summaryPath, Summary.Render(BuildSummaryInput(status)));
+                // The snapshot is taken here, on the game thread; the text is made on the writer thread so it costs the frame nothing.
+                SummaryInput input = BuildSummaryInput(status);
+                writer.SetFile(summaryPath, () => Summary.Render(input));
             }
             catch (Exception e) { Log.Warning("Could not write the summary: " + e.Message); }
         }
@@ -320,16 +332,16 @@ namespace PerformanceLog
             {
                 SessionId = sessionName, Status = status, StartedLocal = startedLocal, Folder = folder,
                 ModVersion = Plugin.Version, ThresholdMs = config.SlowFrameMs, SummarySeconds = config.SummarySeconds, Profile = config.Profile,
-                Seconds = Probe.SessionSeconds, Ticks = Probe.TickCount, Row = Probe.SessionRow(), Stats = Probe.Stats,
+                Seconds = Probe.SessionSeconds, Ticks = Probe.TickCount, Row = Probe.SessionRow(), Stats = Probe.Stats.Clone(),
                 Worst = Probe.WorstFrames(), Windows = Probe.Windows(), Totals = Profile.Totals(),
             };
             try { input.TickIntervalSeconds = services.TickIntervalSeconds(); } catch (Exception) { }
-            foreach (var pair in EnvironmentInfo.Collect())
+            foreach (var pair in environment)
             {
                 if (pair.Key == "game") input.GameVersion = pair.Value;
                 input.Environment.Add(pair);
             }
-            if (services.Mods != null) input.Mods = EnvironmentInfo.Mods(services.Mods);
+            input.Mods = new List<string[]>(modList);
             double[] colony = lastColony;
             if (colony != null && colony.Length >= 4)
                 input.Colony = colony[1].ToString("F0", CultureInfo.InvariantCulture) + " beavers, " + colony[2].ToString("F0", CultureInfo.InvariantCulture) + " bots, " +
@@ -356,7 +368,20 @@ namespace PerformanceLog
 
         // ---- stop ----
 
-        internal static void Stop(string reason)
+        /// <summary>
+        /// Called each frame, from the tick loop's patch, until the first frame has been closed. If none has after a few seconds, another mod has probably replaced
+        /// Unity's player loop and taken the frame markers with it: say so, and put them back once.
+        /// </summary>
+        internal static void CheckFramesArriving()
+        {
+            if (markersRetried || Probe.FrameNumber > 0 || !Probe.Enabled) return;
+            if (Stopwatch.GetTimestamp() - startedTicks < 3 * Stopwatch.Frequency) return;
+            markersRetried = true;
+            Warn("No frame reached the log three seconds after it started. Another mod may have replaced Unity's player loop, so the frame markers are being put back once.");
+            PlayerLoopTiming.Install();
+        }
+
+        internal static void Stop(string reason, bool quitting = false)
         {
             if (writer == null && !Probe.Enabled) return;
             try
@@ -365,11 +390,13 @@ namespace PerformanceLog
                 var final = new List<string>(UnityExtras.FinalLines());
                 final.Add("# capability-final|playerLoop|" + (PlayerLoopTiming.Installed > 0 ? "timed " + PlayerLoopTiming.Installed + " phases" : "not installed"));
                 for (int i = 0; i < Instrumentation.HitCount; i++)
-                    final.Add("# capability-final|patchCalls|" + Instrumentation.HitName(i) + "|" + Instrumentation.Hits[i] + (Instrumentation.Hits[i] == 0 ? "|never ran" : ""));
+                    final.Add("# capability-final|patchCalls|" + Instrumentation.HitName(i) + "|" +
+                              (Instrumentation.InstalledHit[i] ? Instrumentation.Hits[i] + (Instrumentation.Hits[i] == 0 ? "|never ran" : "") : "0|patch not installed"));
                 final.Add("# capability-final|profile|" + Profile.Totals().Count + " keys were timed");
                 finalLines = final;
                 Event("session-end", 0, reason);
-                PlayerLoopTiming.Uninstall();
+                // Not while the game is quitting: the engine may already be taking the player loop down.
+                if (!quitting) PlayerLoopTiming.Uninstall();
                 Probe.Stop();
                 UnityExtras.Stop();
                 if (Probe.LastFailure != null) Log.Warning("The performance log switched itself off: " + Probe.LastFailure);
@@ -384,7 +411,12 @@ namespace PerformanceLog
             }
             finally
             {
+                // Nothing a finished session held may keep the game it measured alive: the delegates in `services` reach the whole colony.
                 writer = null; events = null; profileRingForLoad = null;
+                services = null; environment = null; modList = null; lastColony = null;
+                UnityExtras.ColonySampler = null;
+                Profile.ModResolver = null;
+                Milestones.Clear();
             }
         }
     }
