@@ -6,7 +6,7 @@ the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (91 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (44 checks).
+`dotnet run --project tests -c Release` (94 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (45 checks).
 
 | What | How |
 |---|---|
@@ -14,6 +14,7 @@ the game running. This is the honest list.
 | The per-frame path allocates nothing | `GC.GetAllocatedBytesForCurrentThread` around 2000 frames; also for a wrapper with the log off |
 | Failure containment: a failing clock switches the probe off, a full ring drops rows and counts them | `CoreTests` |
 | The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution | `ProfileTests` |
+| Watched methods: each is sampled at its own rate, widening with its own load inside the budget and coming back down after, with a row (and at least one timing) for every window it ran in; calls nobody timed get a `sampled` 0 row and stay out of the totals | `WatchSamplingTests`, `test_perflog` |
 | The files: header, columns, invariant number format in any language, text tails, events, a file rewritten whole, an unopenable path, dropped rows, flush on stop | `WriterTests` |
 | `summary.md`, `README.md` and `columns.md` generation | `SummaryTests`, `WriterTests.EndToEnd` |
 | Every patch target exists in the installed game (1.1.2.4), has no exception filter, and takes only parameters Harmony can supply | `GameBindingTests.TargetsResolve` |

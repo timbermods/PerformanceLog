@@ -112,7 +112,7 @@ One row per key per window. The last three columns (`name`, `assembly`, `mod`) a
 - `parallel-start`: A parallel singleton's StartParallelTick on the game thread: scheduling only, the work itself runs on worker threads and is not visible here. Every call is timed.
 - `entity`: All the ticks of one kind of entity (a prefab such as a beaver or a farm house). Only every Nth call is timed and the result is scaled up (see 'sampled').
 - `component`: All the ticks of one kind of entity component (a class such as Walker). Only every Nth call is timed and the result is scaled up. Only recorded with Profile = deep.
-- `method`: One method from the Watch list in the config, timed including everything inside it and every patch on it. Calls are counted exactly and every Nth is timed.
+- `method`: One method from the Watch list in the config, timed including everything inside it and every patch on it. Calls are counted exactly; the first call in each window and about every Nth after it are timed, N widening only while that method itself is busy. It has a row for every window it ran in.
 - `load`: A singleton's Load while the game was loading (one row per singleton, window 0).
 - `load-non-singleton`: A non-singleton loader's LoadNonSingletons while the game was loading (window 0).
 - `post-load`: A singleton's PostLoad while the game was loading (window 0).
@@ -125,7 +125,7 @@ One row per key per window. The last three columns (`name`, `assembly`, `mod`) a
 | `tick` | count | last | Simulation ticks since the log started, at the end of the window. |
 | `id` |  | last | The key's number, the same in profile.csv and spikes.csv. |
 | `calls` | count | total | Calls in the window. Exact for singletons and watched methods, estimated (samples times the interval) for entities and components. |
-| `sampled` | count | total | Calls that were actually timed. ms and allocKB are scaled up from these, so a small number means a rough estimate. |
+| `sampled` | count | total | Calls that were actually timed. ms and allocKB are scaled up from these, so a small number means a rough estimate. 0 (a watched method whose timed calls all threw) means none was: ms and allocKB are then unknown, not zero. |
 | `ms` | ms | total | Time spent in all the calls in the window (scaled up from the sampled ones), including everything inside them. |
 | `allocKB` | KB | total | Managed memory allocated by all the calls in the window (scaled up). Coarse when the allocation source is the heap size. For load steps (window 0) it is how much the managed heap grew during the step; a collection in the middle makes it read low. |
 | `maxMs` | ms | largest | The slowest timed call in the window. A large value with a small ms is a rare hitch. |

@@ -60,6 +60,7 @@ namespace PerformanceLog.Tests
             var tests = new List<(string Name, Action Run)>();
             tests.AddRange(CoreTests.All());
             tests.AddRange(ProfileTests.All());
+            tests.AddRange(WatchSamplingTests.All());
             tests.AddRange(WriterTests.All());
             tests.AddRange(SummaryTests.All());
             tests.AddRange(GameBindingTests.All(managed));

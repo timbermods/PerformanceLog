@@ -32,7 +32,8 @@ memory went; what to change is a judgement you make from them, and you should sa
    sources worked on this computer. `prGcBytes`, `ftGpu` and friends are 0 when Unity's release build does not provide them; `mainCpuMs` is 0
    off Windows.
 7. **`profile.csv` is partly estimated.** Singletons are timed on every call. Entity kinds, components and watched methods are timed on every Nth
-   call and scaled up (`sampled` says how many real timings a row rests on; a small number means a rough figure). `allocKB` is coarse when the
+   call and scaled up (`sampled` says how many real timings a row rests on; a small number means a rough figure, and a watched method's row with
+   `sampled` 0 was not timed at all, so its `ms` is unknown, not 0). `allocKB` is coarse when the
    allocation source is the heap size (see the `allocSource` capability line).
 8. **Measuring costs something.** `overheadUs` (the estimate) plus `probeUs` (closing the frame) are microseconds per frame that the mod itself used.
    If they are more than about 2% of `frameMs`, say so before trusting small differences.

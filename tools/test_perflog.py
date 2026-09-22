@@ -551,6 +551,17 @@ class FindingTests(unittest.TestCase):
         self.assertRegex(text, r"Timberborn\.SomethingUI\.Panel\s+game\b")
         self.assertRegex(text, r"Other\.Library\.Thing\s+\(unknown\)")
 
+    def test_a_watched_method_window_nobody_timed_is_not_counted_at_0_ms(self):
+        s = Synthetic()
+        for w in range(1, 7):
+            s.window()
+            # Five windows timed at 0.5 ms a call; in the sixth every timed call threw, so the mod wrote the calls with sampled 0 and no time.
+            timed = w <= 5
+            s.profile.append({"kind": "method", "window": w, "tick": s.tick, "id": 3, "calls": 100 if timed else 40, "sampled": 10 if timed else 0,
+                              "ms": 50.0 if timed else 0.0, "allocKB": 0, "maxMs": 0.6 if timed else 0.0, "name": "Some.Mod.Method()", "assembly": "SomeMod", "mod": "somemod"})
+        text = self.report(s)
+        self.assertRegex(text, r"Some\.Mod\.Method\(\).*\b500\.0 us/call.*\(\+40 calls never timed\)")
+
     def test_loading_that_grew_the_heap_is_reported(self):
         s = Synthetic()
         for _ in range(6):

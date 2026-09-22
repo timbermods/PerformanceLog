@@ -316,6 +316,7 @@ class KeyTotal:
     def __init__(self, kind, name, mod, assembly):
         self.kind, self.name, self.mod, self.assembly = kind, name, mod, assembly
         self.ms = self.kb = self.calls = self.sampled = self.max_ms = 0.0
+        self.untimed = 0.0   # calls in rows with sampled 0 (a watched method nobody timed in that window): not in calls, so ms/calls stays honest
 
 
 def profile_totals(session, tick_from=0, tick_to=None):
@@ -330,6 +331,9 @@ def profile_totals(session, tick_from=0, tick_to=None):
         t = totals.get(key)
         if t is None:
             t = totals[key] = KeyTotal(r["kind"], r.get("name", ""), r.get("mod", ""), r.get("assembly", ""))
+        if r["sampled"] <= 0 and r["calls"] > 0:
+            t.untimed += r["calls"]
+            continue
         t.ms += r["ms"]; t.kb += r["allocKB"]; t.calls += r["calls"]; t.sampled += r["sampled"]; t.max_ms = max(t.max_ms, r["maxMs"])
     return totals
 
@@ -711,8 +715,9 @@ def report(session, args, out):
             all_ms = sum(t.ms for t in rows)
             p("   %s: %.1f ms/s in all" % (title, all_ms / window_secs))
             for t in rows[:(len(rows) if args.all else args.top)]:
-                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms" % (
-                    short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms))
+                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms%s" % (
+                    short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms,
+                    "  (+%d calls never timed)" % t.untimed if t.untimed else ""))
         mods = collections.defaultdict(lambda: [0.0, 0.0])
         for t in totals.values():
             if t.kind in ("tick-singleton", "update-singleton", "late-singleton"):

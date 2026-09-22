@@ -41,7 +41,7 @@ namespace PerformanceLog
             new Column { Name = "tick", Kind = ColumnKind.Int, Aggregate = Aggregate.Last, Unit = "count", Description = "Simulation ticks since the log started, at the end of the window." },
             new Column { Name = "id", Kind = ColumnKind.Int, Aggregate = Aggregate.Last, Unit = "", Description = "The key's number, the same in profile.csv and spikes.csv." },
             new Column { Name = "calls", Kind = ColumnKind.Int, Aggregate = Aggregate.Sum, Unit = "count", Description = "Calls in the window. Exact for singletons and watched methods, estimated (samples times the interval) for entities and components." },
-            new Column { Name = "sampled", Kind = ColumnKind.Int, Aggregate = Aggregate.Sum, Unit = "count", Description = "Calls that were actually timed. ms and allocKB are scaled up from these, so a small number means a rough estimate." },
+            new Column { Name = "sampled", Kind = ColumnKind.Int, Aggregate = Aggregate.Sum, Unit = "count", Description = "Calls that were actually timed. ms and allocKB are scaled up from these, so a small number means a rough estimate. 0 (a watched method whose timed calls all threw) means none was: ms and allocKB are then unknown, not zero." },
             new Column { Name = "ms", Kind = ColumnKind.Fixed2, Aggregate = Aggregate.Sum, Unit = "ms", Description = "Time spent in all the calls in the window (scaled up from the sampled ones), including everything inside them." },
             new Column { Name = "allocKB", Kind = ColumnKind.Fixed1, Aggregate = Aggregate.Sum, Unit = "KB", Description = "Managed memory allocated by all the calls in the window (scaled up). Coarse when the allocation source is the heap size. For load steps (window 0) it is how much the managed heap grew during the step; a collection in the middle makes it read low." },
             new Column { Name = "maxMs", Kind = ColumnKind.Fixed2, Aggregate = Aggregate.Max, Unit = "ms", Description = "The slowest timed call in the window. A large value with a small ms is a rare hitch." },
@@ -93,7 +93,8 @@ namespace PerformanceLog
             public string Name = "";
             public string Assembly = "";
             public string Mod = "";
-            public int MethodInterval = 8;
+            /// <summary>A watched method's interval for this window, and the one it was registered with (the least it goes back to).</summary>
+            public int MethodInterval = 8, GivenInterval = 8;
         }
 
         static readonly object gate = new object();
@@ -115,7 +116,7 @@ namespace PerformanceLog
         // same order every frame, and a fixed stride can land on the same few of them every time and never on the rest.
         static int entityCountdown = 1, componentCountdown = 1, allocCountdown = 1;
         static uint random = 2463534242;
-        static long windowEntityCalls, windowComponentCalls, windowExactCalls, windowMethodCalls;
+        static long windowEntityCalls, windowComponentCalls, windowExactCalls;
         static int frameExact, frameAllocPairs, frameSampledPairs;
         static readonly double[] row = new double[Table.Count];
         static readonly double[] spikeRow = new double[SpikeTable.Count];
@@ -164,7 +165,7 @@ namespace PerformanceLog
             Array.Clear(totalCalls, 0, totalCalls.Length); Array.Clear(totalMax, 0, totalMax.Length);
             touchedCount = 0; TopCount = 0;
             SeedSampling(2463534242);
-            windowEntityCalls = 0; windowComponentCalls = 0; windowExactCalls = 0; windowMethodCalls = 0;
+            windowEntityCalls = 0; windowComponentCalls = 0; windowExactCalls = 0;
             frameExact = 0; frameAllocPairs = 0; frameSampledPairs = 0;
             EntityInterval = 16; ComponentInterval = 64; AllocEvery = 4;
             entityCountdown = Gap(EntityInterval); componentCountdown = Gap(ComponentInterval); allocCountdown = Gap(AllocEvery);
@@ -318,10 +319,9 @@ namespace PerformanceLog
             catch (Exception) { }
         }
 
-        /// <summary>Called before a watched method runs: counts the call exactly and times every Nth.</summary>
+        /// <summary>Called before a watched method runs: counts the call exactly, and times the first call of each window and about every Nth after it.</summary>
         public static Sample BeginMethod(int id)
         {
-            windowMethodCalls++;
             calls[id]++;
             if (--methodCounter[id] > 0) return default;
             methodCounter[id] = Gap(entries[id].MethodInterval);
@@ -346,7 +346,7 @@ namespace PerformanceLog
         public static int RegisterMethod(string name, string assembly, int interval)
         {
             int id = IdFor(ProfileKind.Method, name, assembly);
-            lock (gate) entries[id].MethodInterval = Math.Max(1, interval);
+            lock (gate) entries[id].MethodInterval = entries[id].GivenInterval = Math.Max(1, interval);
             return id;
         }
 
@@ -444,15 +444,28 @@ namespace PerformanceLog
             double msPerTick = 1000.0 / Stopwatch.Frequency;
             int count;
             lock (gate) count = entries.Count;
+            AdaptMethods(windowSeconds);
             for (int id = 0; id < count; id++)
             {
                 if (calls[id] == 0 && timed[id] == 0) continue;
-                double factor = timed[id] > 0 ? (double)Math.Max(calls[id], timed[id]) / timed[id] : 0;
+                if (timed[id] == 0)
+                {
+                    // Counted but never timed: a watched method whose timed calls all threw (Harmony skips the postfix then). The row says so
+                    // with sampled 0; its time is unknown, so the session totals get nothing rather than these calls at 0 ms.
+                    Array.Clear(row, 0, row.Length);
+                    row[0] = (int)KindOf(id); row[1] = window; row[2] = tick; row[3] = id; row[4] = calls[id];
+                    target?.TryPush(row);
+                    calls[id] = 0; ticks[id] = 0; allocN[id] = 0; allocB[id] = 0; max[id] = 0;
+                    continue;
+                }
+                double factor = (double)Math.Max(calls[id], timed[id]) / timed[id];
                 double ms = ticks[id] * msPerTick * factor;
                 double kb = allocN[id] > 0 ? allocB[id] / 1024.0 * ((double)Math.Max(calls[id], allocN[id]) / allocN[id]) : 0;
                 double maxMs = max[id] * msPerTick;
                 totalMs[id] += ms; totalKb[id] += kb; totalCalls[id] += calls[id]; if (maxMs > totalMax[id]) totalMax[id] = maxMs;
-                if (ms >= 0.005 || kb >= 0.5 || maxMs >= 0.5)
+                // A watched method gets a row for every window it ran in, however little it took (there are at most a few dozen), so a
+                // missing row always means it was not called.
+                if (ms >= 0.005 || kb >= 0.5 || maxMs >= 0.5 || KindOf(id) == ProfileKind.Method)
                 {
                     Array.Clear(row, 0, row.Length);
                     row[0] = (int)KindOf(id); row[1] = window; row[2] = tick; row[3] = id;
@@ -477,21 +490,42 @@ namespace PerformanceLog
                     ComponentInterval = Clamp((int)Math.Ceiling(windowComponentCalls / windowSeconds * pairSeconds / (budget * BudgetShareComponent)), 1, 8192);
                     double allocPairSeconds = Math.Max(Probe.AllocPairTicks / frequency, 20e-9);
                     AllocEvery = Clamp((int)Math.Ceiling(windowExactCalls / windowSeconds * allocPairSeconds / (budget * BudgetShareAlloc)), 1, 1024);
-                    // Watched methods keep the interval they were given unless they turn out to be very hot.
-                    lock (gate)
+                }
+            }
+            catch (Exception) { }
+            windowEntityCalls = 0; windowComponentCalls = 0; windowExactCalls = 0;
+        }
+
+        /// <summary>
+        /// Chooses each watched method's interval for the next window from that method's own calls in this one, before they are forgotten.
+        /// It is set again every window and never below the interval the method was given, so a method that was busy once comes back down
+        /// when it quietens, and a rare one next to a busy one keeps its own. The methods' share of the budget is split between the methods
+        /// that ran. Each countdown starts again at 1, so a method that runs in the next window has its first call timed.
+        /// </summary>
+        static void AdaptMethods(double windowSeconds)
+        {
+            try
+            {
+                lock (gate)
+                {
+                    int ran = 0;
+                    for (int id = 0; id < entries.Count; id++)
+                        if (entries[id].Kind == ProfileKind.Method && calls[id] > 0) ran++;
+                    bool measured = windowSeconds > 0 && Probe.SamplePairTicks > 0;
+                    double pairSeconds = Probe.SamplePairTicks / Stopwatch.Frequency + 100e-9; // the key lookup too
+                    double budget = BudgetFraction * BudgetShareMethod / Math.Max(1, ran);
+                    for (int id = 0; id < entries.Count; id++)
                     {
-                        foreach (Entry e in entries)
-                        {
-                            if (e.Kind != ProfileKind.Method) continue;
-                            double perSecond = windowMethodCalls / windowSeconds;
-                            int wanted = Clamp((int)Math.Ceiling(perSecond * pairSeconds / (budget * BudgetShareMethod)), 1, 4096);
-                            if (wanted > e.MethodInterval) e.MethodInterval = wanted;
-                        }
+                        Entry e = entries[id];
+                        if (e.Kind != ProfileKind.Method) continue;
+                        double wanted = measured && calls[id] > 0 ? Math.Ceiling(calls[id] / windowSeconds * pairSeconds / budget) : 0;
+                        int most = Math.Max(e.GivenInterval, 4096);
+                        e.MethodInterval = wanted >= most ? most : Math.Max(e.GivenInterval, (int)wanted);
+                        methodCounter[id] = 1;
                     }
                 }
             }
             catch (Exception) { }
-            windowEntityCalls = 0; windowComponentCalls = 0; windowExactCalls = 0; windowMethodCalls = 0;
         }
 
         static int Clamp(int value, int low, int high) => value < low ? low : value > high ? high : value;
