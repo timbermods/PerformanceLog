@@ -47,7 +47,7 @@ packaging/       manifest.json, PerformanceLog.cfg. build.ps1 builds, tests and 
 
 ```
 .\build.ps1 -SkipTests                                  build + package
-dotnet run --project tests -c Release                   all C# checks (about 70)
+dotnet run --project tests -c Release                   all C# checks (91 at 0.1.3; docs/TESTING.md keeps the current count)
 python -m unittest discover -s tools -p "test_perflog.py"
 dotnet run --project tests -c Release -- --print-columns
 dotnet run --project tests -c Release -- --write-sample tests/fixtures/sample-with-mod
@@ -110,12 +110,13 @@ To read the game's own code (the way every patch target here was checked): `ilsp
 
 ## What is and is not verified
 
-0.1.0 was run once in the real game (2026-09-20, 31 minutes, nine mods including BeaverBuddies, clean exit). Its recording is why 0.1.1 exists: see `CHANGELOG.md` and `docs/TESTING.md`
-(what that run proved, what it broke, and what is still unproven). When you are given a recording, start with the `# capability` and `# capability-final` lines in the `frames.csv`
-header and the "Read first" section of `summary.md`: they say which parts worked. `python tools/perflog.py report <folder>` prints a `KNOWN ISSUE` line for every known defect of the
-version that made it (`KNOWN_ISSUES` in `tools/perflog.py`); add to that list whenever a version is found to record something wrong.
+0.1.0 was first run in the real game on 2026-09-20 (31 minutes, nine mods including BeaverBuddies, clean exit). Its recording is why 0.1.1 exists; 0.1.1 and 0.1.3 have been
+recorded in the game since. See `CHANGELOG.md` and `docs/TESTING.md` (what those runs proved, what the first one broke, and what is still unproven). When you are given a
+recording, start with the `# capability` and `# capability-final` lines in the `frames.csv` header and the "Read first" section of `summary.md`: they say which parts worked.
+`python tools/perflog.py report <folder>` prints a `KNOWN ISSUE` line for every known defect of the version that made it (`KNOWN_ISSUES` in `tools/perflog.py`); add to that list
+whenever a version is found to record something wrong.
 
-Two lessons from that run that shape how to change this code:
+Lessons from the first run that shape how to change this code:
 - **Count what a patch really does.** `# capability-final|patchCalls|...` showed 488601 wrapper swaps in 122150 frames: the hit counters are how a defect that only exists in the game shows up.
   Keep a counter for anything done once per game or per frame.
 - **The game keeps more than one singleton service alive** (the application's and the game's, both updated every frame), so anything remembered "per service" must hold several
