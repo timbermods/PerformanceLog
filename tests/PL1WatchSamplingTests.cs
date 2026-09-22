@@ -11,12 +11,21 @@ namespace PerformanceLog.Tests
     {
         public static IEnumerable<(string, Action)> All()
         {
-            yield return ("Profile: a rare watched method next to a hot one is still timed in every window it runs", RareMethodNextToHotOne);
-            yield return ("Profile: a watched method's interval widens with its own load, inside the budget, and comes back down when the load goes away", IntervalFollowsTheLoad);
-            yield return ("Profile: a watched method called fewer times a window than its interval still has a call timed in every window", FewCallsEveryWindow);
-            yield return ("Profile: a watched method that is busy in bursts keeps the interval its bursts need through the windows it is not called", BurstsStayInsideTheBudget);
-            yield return ("Profile: a watched method that ran but was never timed gets a row with sampled 0 and adds no made-up 0 ms to the totals", UntimedWindowIsWrittenNotGuessed);
+            yield return ("Profile: a rare watched method next to a hot one is still timed in every window it runs", Restoring(RareMethodNextToHotOne));
+            yield return ("Profile: a watched method's interval widens with its own load, inside the budget, and comes back down when the load goes away", Restoring(IntervalFollowsTheLoad));
+            yield return ("Profile: a watched method called fewer times a window than its interval still has a call timed in every window", Restoring(FewCallsEveryWindow));
+            yield return ("Profile: a watched method that is busy in bursts keeps the interval its bursts need through the windows it is not called", Restoring(BurstsStayInsideTheBudget));
+            yield return ("Profile: a watched method that ran but was never timed gets a row with sampled 0 and adds no made-up 0 ms to the totals", Restoring(UntimedWindowIsWrittenNotGuessed));
+            yield return ("Profile: several busy watched methods share the watched methods' budget between them, not each take all of it", Restoring(BusyMethodsShareTheBudget));
         }
+
+        // Prepare sets the static budget; put the default back so the checks that run after these see what they would alone.
+        static Action Restoring(Action check) => () =>
+        {
+            double budget = Profile.BudgetFraction;
+            try { check(); }
+            finally { Profile.BudgetFraction = budget; }
+        };
 
         const double PairNs = 50;   // what the real recordings calibrate for a sampled pair (samplePairNs)
 
@@ -151,6 +160,29 @@ namespace PerformanceLog.Tests
                     if (w >= 3)
                         Check(share <= 0.01 * Profile.BudgetShareMethod * 1.05, "burst window " + w + ": measuring took " + (share * 100).ToString("F3") +
                             "% of a second, over the watched methods' share of the budget: the quiet window before it undid the interval");
+                }
+            }
+        }
+
+        static void BusyMethodsShareTheBudget()
+        {
+            Prepare();
+            using (rig)
+            {
+                // Four methods, each called 200,000 times in a 1 s window. After the first window each is timed at the interval that keeps all four
+                // together inside the methods' share of the budget; without the split each would take the whole share, four times over.
+                int[] ids = Enumerable.Range(0, 4).Select(i => Profile.RegisterMethod("Busy.Method" + i, "M", 8)).ToArray();
+                double pairSeconds = PairNs * 1e-9 + 100e-9;
+                for (int w = 1; w <= 3; w++)
+                {
+                    foreach (int id in ids) for (int i = 0; i < 200000; i++) Call(id, 0.001);
+                    Profile.FlushWindow(w, w, 1, rig.Prof);
+                    List<double[]> rows = rig.ProfileRows();
+                    double share = ids.Sum(id => RowOf(rows, id)[5]) * pairSeconds;
+                    Console.WriteLine("     window " + w + ": the four methods' timing took " + (share * 100).ToString("F3") + "% of a second");
+                    if (w >= 2)
+                        Check(share <= 0.01 * Profile.BudgetShareMethod * 1.05, "window " + w + ": measuring the four took " + (share * 100).ToString("F3") +
+                            "% of a second, over the watched methods' share of the budget: each took the whole share");
                 }
             }
         }

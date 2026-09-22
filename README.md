@@ -4,25 +4,31 @@ A Timberborn 1.1 mod (built against **1.1.2.4**) that measures **where the game'
 person, or an AI assistant such as Claude, can read to find out why a game is slow. It is a diagnostic tool for finding performance problems in
 the game and in other mods. It does nothing else.
 
-Version **0.1.2** is a **preview**. Its automated checks run against the game's real assemblies, and version 0.1.0 has been played once (a 31 minute session with
-nine mods, ending in a normal exit): every patch applied and the recording was complete. That first recording also showed several defects, fixed in 0.1.1; 0.1.2
-adds an in-game settings page and has not itself been played yet. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version. If a part fails to start it
-says so in the log and the summary, that part stays off, and the game carries on. Read [docs/TESTING.md](docs/TESTING.md) for what is and is not verified, and
-how to check it in a game in five minutes.
+Version **0.1.3** is a **preview**, published as a pre-release. Its automated checks run against the game's real assemblies.
+Version 0.1.0 was the first to be played (a 31 minute session with nine mods, ending in a normal exit): every patch applied and the recording was complete.
+That first recording also showed several defects, fixed in 0.1.1. 0.1.2 added an in-game settings page, and 0.1.3 made the most detailed profile the default.
+0.1.1 and 0.1.3 have been played since. A 44 minute 0.1.3 recording with ten mods shows the new defaults working, and every 0.1.1 fix that a recording can show.
+Not verified yet: whether a value changed on the settings page reaches a recording.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version, and [docs/TESTING.md](docs/TESTING.md) for what is and is not verified and how to check
+it in a game in five minutes. If a part fails to start, it says so in the log and the summary, that part stays off, and the game carries on.
 
 It only observes. It never records or replays an action, never uses the game's random numbers and never touches anything the simulation reads, so
 it should not cause a desync in co-op. (That has not been played in co-op yet.)
 
 ## Install
 
-1. Close Timberborn. Extract the release ZIP into `Documents\Timberborn\Mods`. It contains one `PerformanceLog` folder.
-2. It requires the **Harmony** mod (2.4.1 or newer) and the **Mod Settings** mod (1.1.0.0 or newer) from the Steam Workshop.
-3. Launch Timberborn, enable **Performance Log** in the mod manager, and restart.
-4. Play. Leave normally (menu → exit) so the files are finished; if the game crashes the files are still readable and the summary is at most a
-   minute stale. (From 0.1.1 you can also copy or zip the folder while the game runs; 0.1.0 held four of its files open, so a zip made then left them out.) Look for `[PerformanceLog]` lines in `Player.log`
-   (`%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log`).
+1. Open the [Releases page](https://github.com/timbermods/PerformanceLog/releases) and pick the newest pre-release (there is no stable release yet).
+   Under **Assets**, download `PerformanceLog-<version>.zip`, not "Source code".
+2. Close Timberborn. Extract the ZIP into `Documents\Timberborn\Mods`. It contains one `PerformanceLog` folder.
+3. Subscribe to the **Harmony** mod (2.4.1 or newer) and the **Mod Settings** mod (1.1.0.0 or newer) on the Steam Workshop. Performance Log needs both.
+4. Launch Timberborn, enable **Performance Log** in the mod manager, and restart.
+5. Play. Leave normally (menu → exit) so the files are finished. If the game crashes, the files are still readable and the summary is at most a
+   minute stale. You can also copy or zip the folder while the game runs (0.1.0 could not: it held four of its files open, so a zip left them out).
+   Look for `[PerformanceLog]` lines in `Player.log` (`%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log`).
 
-Recordings go to `Documents\Timberborn\PerformanceLog\<date and time>\`, one folder per game session (a session is from a save finishing loading to leaving it).
+Recordings go to `Documents\Timberborn\PerformanceLog\<date and time>\` (for example `2026-09-21_14-05-33`, local time), one folder per game session.
+A session runs from a save finishing loading to leaving it. The `OutputFolder` setting can move them.
 
 ## What to do with a recording
 
@@ -40,9 +46,11 @@ python tools/perflog.py compare <folder A> <folder B>
 python tools/perflog.py list
 ```
 
-`report` says what stands out, with the evidence and what to check next; `compare` lines up two sessions and says what changed and what else differed
-(different mods, game speed, colony size, computer). The tool is also in the release ZIP, in `PerformanceLog\tools`. For a fair comparison, record the
-same save at the same game speed for at least three minutes each, with the window in front, and change one thing.
+`report` says what stands out, with the evidence and what to check next, and names the other mods whose patches run inside a singleton's time.
+`compare` lines up two sessions and says what changed and what else differed (different mods or Harmony patches, game speed, colony size, computer).
+`list` shows every session in `Documents\Timberborn\PerformanceLog`, or in a folder you name. The tool is also in the release ZIP, in
+`PerformanceLog\tools`. For a fair comparison, record the same save at the same game speed for at least three minutes each, with the window in
+front, and change one thing.
 
 ## What it records
 
@@ -86,7 +94,7 @@ Nothing here changes what the game simulates, so co-op players may use different
 | `SpikeContributors` | `8` | .cfg or Mod Settings | How many of the biggest contributors to each slow frame are written to `spikes.csv` (8 is the most it can hold). |
 | `MaxSlowRowsPerMinute` | `300` | .cfg or Mod Settings | At most this many slow frames get a row a minute; the rest are only counted, so a game that is slow all the time cannot fill the disk. |
 | `OutputFolder` | *(empty)* | .cfg only | Where session folders go. Empty = `Documents\Timberborn\PerformanceLog`. |
-| `Watch` | *(none)* | .cfg only | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like. Rows appear in `profile.csv` as kind `method`. |
+| `Watch` | *(none)* | .cfg only | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like (at most 40 methods; every overload of a name is watched). Rows appear in `profile.csv` as kind `method`. |
 | `AutoWatch` | `false` | .cfg only | `true` = also time the patch methods other mods put on the game's hot methods, in the Watch slots the `Watch` entries leave (40 in all). See below. |
 
 The first time you open the Mod Settings page it starts from whatever `PerformanceLog.cfg` already says; after that, whatever you set there is what
@@ -98,9 +106,10 @@ To measure another mod's method, for example:
 Watch = LateGamePerformance.HaulCache.OnTickStarted; LateGamePerformance.MetricsDump.OnTickStarted
 ```
 
-The mod must be enabled so its type can be found. Every call of a watched method pays for a Harmony wrapper and a lookup even when it is not timed, so watching a method that runs thousands of times a tick costs
-more than watching a rare one; the cost is in `overheadUs`. Methods with a `catch ... when` clause are refused (Harmony cannot patch them under Mono and the
-attempt can crash the game) and the log says so.
+The mod must be enabled so its type can be found. Every call of a watched method pays for a Harmony wrapper and a lookup even when it is not timed, so watching a
+method that runs thousands of times a tick costs more than watching a rare one. The cost is in `overheadUs`. Methods with a `catch ... when` clause are refused
+(Harmony cannot patch them under Mono and the attempt can crash the game). A `# watch|` line in the `frames.csv` header, and the "What each measurement source
+could do" section of `summary.md`, say for each name whether it is being watched or why not.
 
 **`AutoWatch = true`** does this for the patches other mods put on the game's hot methods, without naming them. A mod's prefix on every entity's tick
 (BeaverBuddies has one) or on a singleton's `Tick` (Late Game Performance has several) runs inside a row that names the game or the singleton, so its cost
@@ -122,11 +131,12 @@ the code and not yet seen in a two-player game (`docs/TESTING.md`, item 10).
 
 ## Working with other mods
 
-The mod puts a timing wrapper in front of each of the game's singletons, but only on the first tick and first frame of a game, after every other mod's `Load` patches have run, so a mod that looks at
-those singletons (BeaverBuddies reorders the once-per-tick ones by their type) still sees the game's own and tick order is what it would be without this mod. It never replaces a game method and
-never skips the original. When another mod defers the game's save to the end of a tick (BeaverBuddies does), the `queued save` event reads about 0 ms and the real one is the `save (writing the world)`
-event. With `AutoWatch = true` it also puts its own timing prefix and postfix (Harmony id `kyler.performancelog.watch`) around other mods' patch methods on hot methods, when the
-first game loads; the other mods' patches, and the order they run in, stay as they were.
+The mod puts a timing wrapper in front of each of the game's singletons. It does this only on the first tick and first frame of a game, after every other mod's
+`Load` patches have run. So a mod that looks at those singletons (BeaverBuddies reorders the once-per-tick ones by their type) still sees the game's own, and the
+tick order is what it would be without this mod. It never replaces a game method and never skips the original. When another mod defers the game's save to the
+end of a tick (BeaverBuddies does), the `queued save` event reads about 0 ms and the real one is the `save (writing the world)` event.
+With `AutoWatch = true` it also puts its own timing prefix and postfix (Harmony id `kyler.performancelog.watch`) around other mods' patch methods
+on hot methods, when the first game loads; the other mods' patches, and the order they run in, stay as they were.
 
 ## What it costs, and what it cannot see
 
@@ -141,7 +151,7 @@ Everything is timed on the game thread only.
 
 ## How it relates to the BeaverBuddies frame rate log
 
-The measuring core is the frame rate log built for the BeaverBuddies Stability Fork in `1.0.10-perflog-preview` and `preview2`
+The measuring core is the frame rate log built for the BeaverBuddies Stability Fork in `v1.0.10-perflog-preview` and `v1.0.10-perflog-preview2`
 ([`perflog-preview` branch](https://github.com/timbermods/BeaverBuddies-Stability-Fork/tree/perflog-preview)), rebuilt as a standalone mod that works in single
 player and with any mods. What is new: it hooks the game itself (no other mod's code has to be edited), attributes time to mods, records loading and saves,
 generates its own readme and summary, and comes with the analysis tool. What is left out because it is about the co-op layer: the network and event-hash
@@ -149,18 +159,22 @@ timings, waits for the other player, and the garbage collection experiment (this
 
 ## Build from source
 
-Install the .NET 8 SDK and Python 3, and have Timberborn (and the Harmony Workshop mod) installed:
+Install the .NET 8 SDK and Python 3, and have Timberborn and the **Harmony** and **Mod Settings** Workshop mods installed (the build references their DLLs):
 
 ```powershell
 .\build.ps1 -GameDir 'C:\Program Files (x86)\Steam\steamapps\common\Timberborn'
 ```
 
-builds the mod, runs the checks, and creates `dist\PerformanceLog-0.1.2.zip`. `.\build.ps1 -Install` also copies it into your `Mods` folder. The checks alone:
+builds the mod, runs the checks, and creates `dist\PerformanceLog-<version>.zip` (the version in `packaging/manifest.json`). `.\build.ps1 -Install` also copies it into
+your `Mods` folder. The checks alone:
 
 ```
 dotnet run --project tests -c Release
 python -m unittest discover -s tools -p "test_perflog.py"
 ```
+
+If Timberborn is not in the default Steam folder, pass `-GameDir` to `build.ps1` as above. To run the checks alone, give them the game folder too:
+`dotnet run --project tests -c Release -p:GameDir='<game folder>' -- --managed '<game folder>\Timberborn_Data\Managed'`.
 
 No game, Unity or Harmony DLLs are redistributed; they are only build references. See [CLAUDE.md](CLAUDE.md) for how the code is laid out and how to change it.
 

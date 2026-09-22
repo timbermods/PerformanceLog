@@ -155,8 +155,53 @@ namespace PerformanceLog
                     t.Append("| `").Append(Columns.PhaseNames[i]).Append("` | ").Append(F(ms, 2)).Append(" | ").Append(Pct(ms, mean)).Append(" |\n");
                 }
                 t.Append('\n');
+                double[] split = OtherByPhase(r);
+                t.Append("How `otherMs` splits by Unity phase (each phase less the timed parts that run in it):\n\n| Part of `otherMs` | ms per frame | Share of `otherMs` |\n|---|---|---|\n");
+                for (int i = 0; i < OtherSplitNames.Length; i++)
+                    t.Append("| ").Append(OtherSplitNames[i]).Append(" | ").Append(F(split[i], 2)).Append(" | ").Append(Pct(split[i], r[Columns.OtherMs])).Append(" |\n");
+                t.Append('\n');
             }
             else t.Append("_Unity's frame phases were not measured (see the capabilities below)._\n\n");
+        }
+
+        static readonly int UpdatePhase = Array.IndexOf(Columns.PhaseNames, "plUpdate"), LatePhase = Array.IndexOf(Columns.PhaseNames, "plLate"),
+            PostPhase = Array.IndexOf(Columns.PhaseNames, "plPost");
+
+        static readonly string[] OtherSplitNames =
+        {
+            "Update phase outside the timed parts: other scripts' Update (the game's and mods' MonoBehaviours) and coroutines",
+            "LateUpdate phase outside `lateMs`: other work in Unity's LateUpdate phase (animation, UI Toolkit, scripts' LateUpdate)",
+            "`plPost`: drawing, presenting the frame and the wait for vertical sync",
+            "Unity's other phases (`plTime` to `plPre`: time, input, physics)",
+            "Between the phases",
+        };
+
+        /// <summary>
+        /// <c>otherMs</c> of a row split by Unity phase, in the order of <see cref="OtherSplitNames"/>: the Update phase less the timed parts that run
+        /// in it (the tick loop with its parts, and the singleton updates), the LateUpdate phase less <c>lateMs</c>, <c>plPost</c>, the phases before
+        /// Update, and what falls between the phases. The game saves in its LateUpdate and a mod that defers the save to the end of a tick
+        /// (BeaverBuddies) in Update; the row does not say which, so <c>saveMs</c> is taken out of the phase with more room left. That is the phase it
+        /// ran in, except for a save shorter than the gap between the two phases' own remainders: then one phase reads high and the other low by up
+        /// to the save. A row that holds both kinds of save is split approximately. tools/perflog.py (split_other) splits the same way, but per
+        /// summary window, where this splits the session's mean row, so the two can differ in a session that has both kinds.
+        /// </summary>
+        static double[] OtherByPhase(double[] r)
+        {
+            double update = r[Columns.PhaseBase + UpdatePhase], late = r[Columns.PhaseBase + LatePhase] - r[Columns.SlotBase + (int)Slot.LateUpdate];
+            for (int i = 0; i <= (int)Slot.Update; i++) update -= r[Columns.SlotBase + i];
+            double save = r[Columns.SlotBase + (int)Slot.Save];
+            if (save > 0)
+            {
+                if (late >= update) late -= save;
+                else update -= save;
+            }
+            var split = new double[OtherSplitNames.Length];
+            split[0] = Math.Max(0, update);
+            split[1] = Math.Max(0, late);
+            split[2] = r[Columns.PhaseBase + PostPhase];
+            for (int i = 0; i < UpdatePhase; i++) split[3] += r[Columns.PhaseBase + i];
+            split[4] = Math.Max(0, r[Columns.OtherMs] - split[0] - split[1] - split[2] - split[3]);
+            return split;
         }
 
         static void Ticks(StringBuilder t, SummaryInput s, double[] r)
@@ -218,8 +263,16 @@ namespace PerformanceLog
             double seconds = Math.Max(1, s.Seconds);
             SessionStats st = s.Stats;
             t.Append("## Garbage collection and memory\n\n");
+            // A frame whose allocation was lost to a collection (heap-size counter) is left out of the rate: its time, and whatever growth the heap
+            // still showed in it, which the allocKB total holds but is not what the frame allocated.
+            double measuredSeconds = Math.Max(1, s.Seconds - st.AllocUnmeasuredMs / 1000);
+            double measuredKb = Math.Max(0, r[Columns.AllocKB] - st.AllocUnmeasuredKB);
             t.Append("- ").Append(F(gc, 0)).Append(" garbage collections (").Append(F(gc / (seconds / 60), 1)).Append(" per minute). The game allocated about ")
-                .Append(F(r[Columns.AllocKB] / seconds, 0)).Append(" KB per second (").Append(F(r[Columns.AllocKB] / Math.Max(1, r[Columns.Ticks]), 0)).Append(" KB per tick).\n");
+                .Append(F(measuredKb / measuredSeconds, 0)).Append(" KB per second (").Append(F(r[Columns.AllocKB] / Math.Max(1, r[Columns.Ticks]), 0)).Append(" KB per tick).\n");
+            if (st.AllocUnmeasuredFrames > 0)
+                t.Append("- Allocation was **not measured in ").Append(st.AllocUnmeasuredFrames).Append(st.AllocUnmeasuredFrames == 1 ? " frame" : " frames")
+                    .Append("** (").Append(F(st.AllocUnmeasuredMs / 1000, 1)).Append(" s): the allocation counter fell during them, as the heap size does at a garbage collection, so what ")
+                    .Append("those frames allocated is lost and their KB columns read low. They are left out of the per-second figure above; in `frames.csv` the slow ones are the `F` rows with `gcDelta` above 0 or a negative `allocKB`.\n");
             t.Append("- Managed heap ranged ").Append(F(st.HeapMinMB, 0)).Append(" to ").Append(F(st.HeapMaxMB, 0)).Append(" MB; at the last sample Unity's managed heap was ")
                 .Append(F(r[Columns.HeavyBase], 0)).Append(" MB reserved, ").Append(F(r[Columns.HeavyBase + 1], 0)).Append(" MB in use, ").Append(F(r[Columns.HeavyBase + 2], 0))
                 .Append(" MB in all with native memory, and the process held ").Append(F(r[Columns.HeavyBase + 3], 0)).Append(" MB in RAM.\n");
@@ -331,7 +384,8 @@ namespace PerformanceLog
             t.Append("## The slowest frames\n\n");
             if (s.Worst.Count == 0) { t.Append("No frame reached the slow-frame threshold.\n\n"); return; }
             t.Append("`frames.csv` has a row for every slow frame and `spikes.csv` the biggest contributors to each; these are the worst ").Append(s.Worst.Count)
-                .Append(". `Biggest parts` are the timed slots of the frame; `Blame` are the singletons that spent the most time in it.\n\n");
+                .Append(". `Biggest parts` are the timed slots of the frame; `Blame` names the singletons that took at least ").Append(F(100 * BlameMinShare, 0))
+                .Append("% of the frame or ").Append(F(BlameMinMs, 0)).Append(" ms, biggest first. When none did, it says so, and whether the frame had a save or a garbage collection, which no singleton's time shows.\n\n");
             t.Append("| Frame | Tick | Frame ms | Speed | Ticks | GC | Save | Biggest parts | Blame |\n|---|---|---|---|---|---|---|---|---|\n");
             foreach (WorstFrame w in s.Worst)
             {
@@ -340,14 +394,43 @@ namespace PerformanceLog
                 for (int i = 0; i < Columns.SlotCount; i++) parts.Add(new KeyValuePair<string, double>(Columns.SlotTimeNames[i], r[Columns.SlotBase + i]));
                 parts.Add(new KeyValuePair<string, double>("otherMs", r[Columns.OtherMs]));
                 string top = string.Join(", ", parts.OrderByDescending(p => p.Value).Take(3).Select(p => p.Key + " " + F(p.Value, 0)));
-                var blame = new List<string>();
-                for (int i = 0; i < w.TopIds.Length && i < 3; i++)
-                    blame.Add(Short(Profile.NameOf(w.TopIds[i])) + " " + F(w.TopMs[i], 0));
                 t.Append("| ").Append(F(r[Columns.Frame], 0)).Append(" | ").Append(F(r[Columns.Tick], 0)).Append(" | ").Append(F(r[Columns.FrameMs], 0)).Append(" | ")
                     .Append(F(r[Columns.Speed], 0)).Append(" | ").Append(F(r[Columns.Ticks], 0)).Append(" | ").Append(r[Columns.GcDelta] > 0 ? "yes" : "").Append(" | ")
-                    .Append(r[Columns.Saving] > 0 ? "yes" : "").Append(" | ").Append(top).Append(" | ").Append(string.Join(", ", blame)).Append(" |\n");
+                    .Append(r[Columns.Saving] > 0 ? "yes" : "").Append(" | ").Append(top).Append(" | ").Append(Blame(w)).Append(" |\n");
             }
             t.Append('\n');
+        }
+
+        /// <summary>
+        /// A singleton is blamed for a slow frame only when it took at least this share of the frame, or at least <see cref="BlameMinMs"/>.
+        /// The biggest singleton of a frame that a save or a collection made slow is usually a millisecond or two of it, and naming it sends the
+        /// reader after the wrong thing. tools/perflog.py uses the same two numbers.
+        /// </summary>
+        public const double BlameMinShare = 0.10;
+        /// <summary>A singleton this long is worth naming in a frame of any length. See <see cref="BlameMinShare"/>.</summary>
+        public const double BlameMinMs = 5;
+
+        /// <summary>The Blame cell of a slow frame: the singletons that took a real part of it, or that none did and what else the frame had.</summary>
+        static string Blame(WorstFrame w)
+        {
+            double[] r = w.Row;
+            double frameMs = r[Columns.FrameMs];
+            var named = new List<string>();
+            // TopIds are biggest first, so the first one below both limits ends the list.
+            for (int i = 0; i < w.TopIds.Length && i < 3; i++)
+            {
+                if (w.TopMs[i] < BlameMinMs && w.TopMs[i] < BlameMinShare * frameMs) break;
+                named.Add(Short(Profile.NameOf(w.TopIds[i])) + " " + F(w.TopMs[i], 0));
+            }
+            if (named.Count > 0) return string.Join(", ", named);
+            // No singleton was timed in the frame: nothing to say, as perflog.py's blame_text (a zero is not a measurement).
+            if (w.TopIds.Length == 0) return "";
+            string text = "no singleton stood out (largest " + F(w.TopMs[0]) + " ms, " + Pct(w.TopMs[0], frameMs) + " of the frame)";
+            var had = new List<string>();
+            if (r[Columns.Saving] > 0) had.Add("a save");
+            if (r[Columns.GcDelta] > 0) had.Add("a garbage collection");
+            if (had.Count > 0) text += "; the frame had " + string.Join(" and ", had);
+            return text;
         }
 
         static void Tail(StringBuilder t, SummaryInput s)

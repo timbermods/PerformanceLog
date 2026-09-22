@@ -48,7 +48,7 @@ packaging/       manifest.json, PerformanceLog.cfg. build.ps1 builds, tests and 
 
 ```
 .\build.ps1 -SkipTests                                  build + package
-dotnet run --project tests -c Release                   all C# checks (about 70)
+dotnet run --project tests -c Release                   all C# checks (91 at 0.1.3; docs/TESTING.md keeps the current count)
 python -m unittest discover -s tools -p "test_perflog.py"
 dotnet run --project tests -c Release -- --print-columns
 dotnet run --project tests -c Release -- --write-sample tests/fixtures/sample-with-mod
@@ -84,6 +84,10 @@ To read the game's own code (the way every patch target here was checked): `ilsp
   `is IEarlyTickableSingleton` and a wrapper would hide the type and change tick order. The reference to the wrapped service is weak. There is no Harmony patch in the hot loop, so
   nothing depends on the runtime not inlining a method, and a mod's own patch on the singleton is inside the measurement. Entity kinds are the one place a per-call patch is unavoidable
   (`TickableEntity.Tick`), so that is sampled.
+- **An entity is keyed by its kind, not by the name the tick system recorded** (`Profile.EntityKindOf`: the name up to its first space or `(`). The game renames a character loaded from a
+  save to `<template> <its own name>` before the tick system records it, and one made during play is `<template>(Clone)`, so up to 0.1.3 every loaded beaver was its own row and beavers
+  ranked far too low. `tools/perflog.py` (`entity_kind`) applies the same rule to older recordings, so compare lines old and new up: change both together. Its known-issue
+  note is printed only when a recording's entity rows really are split. No template name in the game or the installed mods contains a space or `(`; a modded template whose name did would be cut short.
 - **Saves are timed at three hooks** (`SaveQueued`, `SaveInstantlySkippingNameValidation`, `SaveWriter.WriteToSaveStream`); whichever is entered first owns the save (`SaveTracker`), and a save open for
   a minute is treated as abandoned (the game's save throws on an IO error and skips its postfix). BeaverBuddies defers the real save, so the `SaveWriter` hook is what times it.
 - **Nothing a session holds may outlive it**: `Session.Stop` clears `services` (its delegates reach the whole colony), the colony sampler, the mod resolver and the milestones, and `Session.Start`
@@ -117,12 +121,13 @@ To read the game's own code (the way every patch target here was checked): `ilsp
 
 ## What is and is not verified
 
-0.1.0 was run once in the real game (2026-09-20, 31 minutes, nine mods including BeaverBuddies, clean exit). Its recording is why 0.1.1 exists: see `CHANGELOG.md` and `docs/TESTING.md`
-(what that run proved, what it broke, and what is still unproven). When you are given a recording, start with the `# capability` and `# capability-final` lines in the `frames.csv`
-header and the "Read first" section of `summary.md`: they say which parts worked. `python tools/perflog.py report <folder>` prints a `KNOWN ISSUE` line for every known defect of the
-version that made it (`KNOWN_ISSUES` in `tools/perflog.py`); add to that list whenever a version is found to record something wrong.
+0.1.0 was first run in the real game on 2026-09-20 (31 minutes, nine mods including BeaverBuddies, clean exit). Its recording is why 0.1.1 exists; 0.1.1 and 0.1.3 have been
+recorded in the game since. See `CHANGELOG.md` and `docs/TESTING.md` (what those runs proved, what the first one broke, and what is still unproven). When you are given a
+recording, start with the `# capability` and `# capability-final` lines in the `frames.csv` header and the "Read first" section of `summary.md`: they say which parts worked.
+`python tools/perflog.py report <folder>` prints a `KNOWN ISSUE` line for every known defect of the version that made it (`KNOWN_ISSUES` in `tools/perflog.py`); add to that list
+whenever a version is found to record something wrong.
 
-Two lessons from that run that shape how to change this code:
+Lessons from the first run that shape how to change this code:
 - **Count what a patch really does.** `# capability-final|patchCalls|...` showed 488601 wrapper swaps in 122150 frames: the hit counters are how a defect that only exists in the game shows up.
   Keep a counter for anything done once per game or per frame.
 - **The game keeps more than one singleton service alive** (the application's and the game's, both updated every frame), so anything remembered "per service" must hold several
