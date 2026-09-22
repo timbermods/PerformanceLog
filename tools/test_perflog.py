@@ -888,6 +888,10 @@ class FindingTests(unittest.TestCase):
         section = self.report(session({"patches-unavailable": "InvalidOperationException no"})).split("6. WHERE THE TIME GOES")[1].split("7. GARBAGE COLLECTION")[0]
         self.assertNotIn("hot methods other mods patch (", section)
         self.assertIn("patches were not recorded", section, "a recording without the patch list says so, not that nothing is patched")
+        bare = Synthetic(header={"patches-unavailable": "InvalidOperationException no"})   # no profile at all
+        for _ in range(8):
+            bare.window(frame_ms=16.7)
+        self.assertIn("patches were not recorded", self.report(bare), "and so does one without a profile")
 
     def test_heap_mode_leaves_frames_with_a_collection_out_of_allocation_per_second(self):
         def session(source, final=None):

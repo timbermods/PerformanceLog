@@ -1073,7 +1073,7 @@ def report(session, args, out):
                 p("     %-34s %8.2f ms/s  %8.1f KB/s" % (mod, ms / window_secs, kb / window_secs))
         hot_patches(p, session, hot, args)
         p()
-    elif hot:
+    elif hot or session.h("patches-unavailable"):
         p("6. HOT METHODS OTHER MODS PATCH (this session has no profile)")
         hot_patches(p, session, hot, args)
         p()

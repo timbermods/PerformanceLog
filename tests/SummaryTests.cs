@@ -149,6 +149,8 @@ namespace PerformanceLog.Tests
                 input.Worst.Add(Slow(103, 99, 0, 0, new[] { routes, panels }, new[] { 95.0, 1.0 }));
                 // 6 ms of a 215 ms frame is under 10% but over 5 ms: a singleton that long is worth naming in any frame.
                 input.Worst.Add(Slow(104, 215, 1, 0, new[] { districts, panels }, new[] { 6.0, 1.0 }));
+                // A save frame in which no singleton was timed at all: nothing was measured, so nothing is said (as perflog.py's blame_text).
+                input.Worst.Add(Slow(105, 800, 1, 790, new int[0], new double[0]));
                 string text = Summary.Render(input);
                 string Row(int frame) => text.Split('\n').Single(l => l.StartsWith("| " + frame + " | "));
 
@@ -160,6 +162,8 @@ namespace PerformanceLog.Tests
                 Check(hitch.Contains("RouteMapsBackground 95"), "the singleton that took the frame is named: " + hitch);
                 Check(!hitch.Contains("PanelStack") && !hitch.Contains("stood out"), "and only it: " + hitch);
                 Check(mixed.Contains("DistrictCitizenAssigner 6") && !mixed.Contains("PanelStack"), "5 ms or more is named whatever the share: " + mixed);
+                string untimed = Row(105);
+                Check(!untimed.Contains("stood out"), "a frame with no singleton timed does not say none stood out: " + untimed);
             }
             finally { rig.Dispose(); }
         }

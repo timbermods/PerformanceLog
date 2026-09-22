@@ -423,8 +423,9 @@ namespace PerformanceLog
                 named.Add(Short(Profile.NameOf(w.TopIds[i])) + " " + F(w.TopMs[i], 0));
             }
             if (named.Count > 0) return string.Join(", ", named);
-            string text = "no singleton stood out";
-            if (w.TopIds.Length > 0) text += " (largest " + F(w.TopMs[0]) + " ms, " + Pct(w.TopMs[0], frameMs) + " of the frame)";
+            // No singleton was timed in the frame: nothing to say, as perflog.py's blame_text (a zero is not a measurement).
+            if (w.TopIds.Length == 0) return "";
+            string text = "no singleton stood out (largest " + F(w.TopMs[0]) + " ms, " + Pct(w.TopMs[0], frameMs) + " of the frame)";
             var had = new List<string>();
             if (r[Columns.Saving] > 0) had.Add("a save");
             if (r[Columns.GcDelta] > 0) had.Add("a garbage collection");
