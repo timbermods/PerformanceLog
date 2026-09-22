@@ -64,6 +64,11 @@ Any method can also be timed by name (`Watch` in the config). See the file.
 
 ## Settings
 
+**The defaults capture the most detail a session can hold without touching anything**: deep profiling (every entity component sampled,
+not just entity kinds), every spike slot filled, and a sampling budget wide enough that `profile.csv`'s numbers rest on real samples
+rather than a rough scale-up. This costs a bit more than a lighter profile — see `OverheadBudgetPercent` below — so lower these if that
+ever matters more than the detail.
+
 Six of the settings can be changed from Timberborn's **Mod Settings** menu, with no restart: they take effect from the next game or save you load.
 The rest — `Enabled`, `Profile`, `Watch` and `OutputFolder` — decide which parts of the game get patched, which is settled before that menu exists,
 so they live only in `PerformanceLog.cfg` (next to `manifest.json` in the mod's `version-1.1` folder) and need the game restarted after editing.
@@ -75,9 +80,9 @@ Nothing here changes what the game simulates, so co-op players may use different
 | `SlowFrameMs` | `50` | .cfg or Mod Settings | A frame this long gets its own row in `frames.csv`. |
 | `SummarySeconds` | `10` | .cfg or Mod Settings | How often a summary row is written. |
 | `ProfileSeconds` | `30` | .cfg or Mod Settings | How often `profile.csv` is written. |
-| `Profile` | `standard` | .cfg only | `off` (no patch on the entity tick at all), `standard` or `deep` (also samples every entity component). |
-| `OverheadBudgetPercent` | `0.5` | .cfg or Mod Settings | How much of a second the sampling may spend measuring; it widens the sampling on its own when there are many entities. |
-| `SpikeContributors` | `5` | .cfg or Mod Settings | How many of the biggest contributors to each slow frame are written to `spikes.csv`. |
+| `Profile` | `deep` | .cfg only | `off` (no patch on the entity tick at all), `standard` (entity kinds sampled) or `deep` (also samples every entity component, e.g. `Walker`, `Workplace`). |
+| `OverheadBudgetPercent` | `1` | .cfg or Mod Settings | How much of a second the sampling may spend measuring; it widens the sampling on its own when there are many entities. |
+| `SpikeContributors` | `8` | .cfg or Mod Settings | How many of the biggest contributors to each slow frame are written to `spikes.csv` (8 is the most it can hold). |
 | `MaxSlowRowsPerMinute` | `300` | .cfg or Mod Settings | At most this many slow frames get a row a minute; the rest are only counted, so a game that is slow all the time cannot fill the disk. |
 | `OutputFolder` | *(empty)* | .cfg only | Where session folders go. Empty = `Documents\Timberborn\PerformanceLog`. |
 | `Watch` | *(none)* | .cfg only | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like. Rows appear in `profile.csv` as kind `method`. |

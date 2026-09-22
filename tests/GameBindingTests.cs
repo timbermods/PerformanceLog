@@ -615,12 +615,16 @@ namespace PerformanceLog.Tests
         static void ConfigParsing()
         {
             var config = new Config();
-            Equal(true, config.Enabled); Equal(Config.ProfileStandard, config.Profile); Equal(50.0, config.SlowFrameMs);
+            // Defaults capture the most detail a fresh install can, with nothing configured: deep profiling, every spike slot, a
+            // doubled sampling budget.
+            Equal(true, config.Enabled); Equal(Config.ProfileDeep, config.Profile); Equal(50.0, config.SlowFrameMs);
+            Equal(PerformanceLog.Profile.TopK, config.SpikeContributors); Equal(1.0, config.OverheadBudgetPercent);
+            Check(config.Deep && config.SamplesEntities, "deep by default");
             config.Apply(Config.Parse(new[]
             {
                 "# a comment",
                 "Enabled = true   # trailing comment",
-                "SlowFrameMs=33.5", "SummarySeconds = 0", "ProfileSeconds=100000", "Profile = DEEP", "SpikeContributors = 99",
+                "SlowFrameMs=33.5", "SummarySeconds = 0", "ProfileSeconds=100000", "Profile = STANDARD", "SpikeContributors = 99",
                 "OverheadBudgetPercent = 1", "OutputFolder = D:\\logs", "MaxSlowRowsPerMinute = 5",
                 "Watch = A.B.C; D.E.F",
                 "Watch = G.H.I",
@@ -629,9 +633,9 @@ namespace PerformanceLog.Tests
             Equal(33.5, config.SlowFrameMs);
             Equal(1.0, config.SummarySeconds, "clamped up");
             Equal(1800.0, config.ProfileSeconds, "clamped down");
-            Equal(Config.ProfileDeep, config.Profile);
-            Check(config.Deep && config.SamplesEntities);
-            Equal(Profile.TopK, config.SpikeContributors);
+            Equal(Config.ProfileStandard, config.Profile);
+            Check(!config.Deep && config.SamplesEntities, "the .cfg file can still move away from the deep default");
+            Equal(Profile.TopK, config.SpikeContributors);   // clamped down from 99
             Equal(1.0, config.OverheadBudgetPercent);
             Equal("D:\\logs", config.OutputFolder);
             Equal(10, config.MaxSlowRowsPerMinute);   // clamped up
@@ -646,7 +650,7 @@ namespace PerformanceLog.Tests
         {
             var config = new Config();
             config.Apply(Config.Parse(new[] { "Enabled = maybe", "SlowFrameMs = fast", "Profile = extreme", "Surprise = 1" }));
-            Equal(true, config.Enabled); Equal(50.0, config.SlowFrameMs); Equal(Config.ProfileStandard, config.Profile);
+            Equal(true, config.Enabled); Equal(50.0, config.SlowFrameMs); Equal(Config.ProfileDeep, config.Profile);
             Equal(4, config.Problems.Count);
             Check(config.Problems.Any(p => p.Contains("Enabled")) && config.Problems.Any(p => p.Contains("unknown setting Surprise")));
             var many = new Config();
@@ -687,7 +691,7 @@ namespace PerformanceLog.Tests
             Equal((int)Config.MaxSlowRowsPerMinuteMin, cfg.MaxSlowRowsPerMinute);
             Equal(Config.OverheadBudgetPercentMax, cfg.OverheadBudgetPercent);
             // Enabled, Profile, Watch and OutputFolder decide which patches exist, so ApplyTo must never touch them.
-            Equal(true, cfg.Enabled); Equal(Config.ProfileStandard, cfg.Profile); Equal(0, cfg.Watch.Count); Equal("", cfg.OutputFolder);
+            Equal(true, cfg.Enabled); Equal(Config.ProfileDeep, cfg.Profile); Equal(0, cfg.Watch.Count); Equal("", cfg.OutputFolder);
         }
 
         static void SettingsSeedFromTheCfgFile()

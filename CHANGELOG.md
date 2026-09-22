@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.3 (preview, not yet played)
+
+**The defaults now capture the most detail a session can hold without anyone touching a setting**, so every recording made from a plain
+install is as informative as this mod can make it.
+
+- `Profile` default: `standard` → **`deep`**. Every kind of entity component is now sampled (`Walker`, `Workplace`, and so on), not just
+  entity kinds. This is the first time `deep` mode's patch on `MeteredTickableComponent.Tick` will run in a real game outside a hand-set
+  `.cfg` file; see `docs/TESTING.md`.
+- `SpikeContributors` default: `5` → **`8`** (`Profile.TopK`, the most a slow frame's `spikes.csv` rows can hold), tied to `Profile.TopK`
+  so the two can never drift apart.
+- `OverheadBudgetPercent` default: `0.5` → **`1`**. The sampling intervals this drives (entity, component, allocation) are chosen to stay
+  under this budget; doubling it lets them run about twice as dense, so a `profile.csv` row rests on more real samples and less scaling
+  up. Still well under the 2% the report itself calls "measuring costs too much."
+- `SlowFrameMs`, `SummarySeconds`, `ProfileSeconds` and `MaxSlowRowsPerMinute` are unchanged: they trade off row count and file size
+  rather than the depth of any one row, and the budget system above already throttles itself if measuring gets expensive, so there was no
+  clear "more detail" case for moving them, only a "more rows" one.
+- Expect a real, measurable increase in the mod's own cost from this alone — deep's component sampling plus double the sampling budget.
+  Nobody has played it yet; the five-minute check in `docs/TESTING.md` now starts by checking `overheadUs` is still reasonable.
+
 ## 0.1.2 (preview, not yet played)
 
 An in-game settings page, hooked into the **Mod Settings** mod (now a required dependency, like Harmony).

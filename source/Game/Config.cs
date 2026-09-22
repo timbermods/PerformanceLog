@@ -16,19 +16,28 @@ namespace PerformanceLog
 
         // Defaults and valid ranges for the numeric settings, named so PerformanceLog.cfg's own clamp (Apply, below) and the in-game
         // settings panel (Settings.cs) always agree; a slider there uses exactly these bounds, never a narrower "nicer" one.
+        //
+        // Every default below is chosen for the most detail a fresh install can capture without anyone touching a setting: deep
+        // profiling, every spike slot filled, and a sampling budget generous enough that "sampled" counts in profile.csv are rarely
+        // tiny. This costs more than the old defaults (roughly double the sampling overhead, plus deep's component sampling); nothing
+        // here is unbounded, and MaxSlowRowsPerMinute, SlowFrameMs and the window sizes are left where they were, since they trade off
+        // row count and file size rather than the depth of what a single row can say, and the budget system still throttles itself if
+        // measuring gets expensive.
         public const double SlowFrameMsDefault = 50, SlowFrameMsMin = 1, SlowFrameMsMax = 5000;
         public const double SummarySecondsDefault = 10, SummarySecondsMin = 1, SummarySecondsMax = 600;
         public const double ProfileSecondsDefault = 30, ProfileSecondsMin = 5, ProfileSecondsMax = 1800;
-        public const double OverheadBudgetPercentDefault = 0.5, OverheadBudgetPercentMin = 0.05, OverheadBudgetPercentMax = 5;
-        public const int SpikeContributorsDefault = 5;
+        // Double the old 0.5%: still comfortably under the 2% the report itself calls out as "measuring costs too much" once the
+        // patch-call overhead that is not budget-limited is added on top.
+        public const double OverheadBudgetPercentDefault = 1, OverheadBudgetPercentMin = 0.05, OverheadBudgetPercentMax = 5;
         public const int MaxSlowRowsPerMinuteDefault = 300, MaxSlowRowsPerMinuteMin = 10, MaxSlowRowsPerMinuteMax = 6000;
-        // SpikeContributors' upper bound is PerformanceLog.Profile.TopK (8), read live below so the two can never drift apart.
+        // Every slot filled: this is PerformanceLog.Profile.TopK itself, a const in the same compilation, so the two can never drift apart.
+        public const int SpikeContributorsDefault = PerformanceLog.Profile.TopK;
 
         public bool Enabled = true;
         public double SlowFrameMs = SlowFrameMsDefault;
         public double SummarySeconds = SummarySecondsDefault;
         public double ProfileSeconds = ProfileSecondsDefault;
-        public string Profile = ProfileStandard;
+        public string Profile = ProfileDeep;
         public double OverheadBudgetPercent = OverheadBudgetPercentDefault;
         public int SpikeContributors = SpikeContributorsDefault;
         public int MaxSlowRowsPerMinute = MaxSlowRowsPerMinuteDefault;
