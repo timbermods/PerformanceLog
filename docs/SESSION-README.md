@@ -5,7 +5,7 @@ only. The mod never changes what the game simulates, so a recording shows the ga
 
 **If you are a Claude chat asked to find out why this session was slow: read `summary.md` first, then this file's "Diagnosing"
 section, then dig into the CSV files with the questions it gives you.** Nothing here is a verdict. The numbers say where time and
-memory went; what to change is a judgement you make from them, and you should say how sure you are.
+memory went; what to change is a judgment you make from them, and you should say how sure you are.
 
 ## The files
 
@@ -56,9 +56,9 @@ Start by writing down what the complaint is, because the causes differ:
 
 1. **`otherMs` is the biggest part**, and `plPost` (or `ftWait`, `ftGpu`) is large: the game thread is waiting for the graphics card or vertical
    sync, not computing. Look at `mainCpuMs` against `frameMs`: a game thread far under 100% busy confirms it. **First rule out that this is vertical sync
-   doing its job:** with vsync on (`# display|` says `vSyncCount=1`) frames sit at the refresh interval (16.7 ms at 60 Hz) whenever the computer has time to
+   doing its job:** with vsync on (`# display:` says `vSyncCount=1`) frames sit at the refresh interval (16.7 ms at 60 Hz) whenever the computer has time to
    spare, and that wait is healthy, not slowness. It only points at the graphics card when the frames are *longer* than the sync interval (or vsync is off) and the
-   game thread is still not busy. Then check `prDraw`/`prSetPass`/`prBatches`/`prTris` (a lot of drawing), the resolution and `# gpu|`. This is a
+   game thread is still not busy. Then check `prDraw`/`prSetPass`/`prBatches`/`prTris` (a lot of drawing), the resolution and `# gpu:`. This is a
    graphics-settings problem, not a mod problem, unless a mod adds drawing.
    When frames are pinned at the sync interval, **compare work, not frame time**: the sum of the timed parts (everything but `otherMs`) is what a change in the game or a mod moves.
 2. **`updMs` is big**: per-frame singleton updates (the user interface, the camera, input, and many mods). `profile.csv` rows of kind
@@ -73,7 +73,7 @@ Start by writing down what the complaint is, because the causes differ:
 4. **`saveMs`**: the game saving. `events.csv` has each save with its stages. (A mod that defers the save to the end of a tick, such as BeaverBuddies, makes the `queued save` event read about 0 ms; the
    `save (writing the world)` event is the real one.)
 5. **Garbage collection**: `gcDelta` > 0 in slow frames; a sawtooth `heapMB`; large allocation per tick (`tickKB`, `singKB`, `entKB`, and `allocKB` per
-   second in `summary.md`). Long collection pauses on one computer and not another point at settings (`# gc|`, `# bootconfig|` for
+   second in `summary.md`). Long collection pauses on one computer and not another point at settings (`# gc:`, `# bootconfig|` for
    `gc-max-time-slice`, `# cmdline|`). Which singleton or entity kind allocates the most is in `profile.csv` (`allocKB`).
 
 ### Which mod is it?
