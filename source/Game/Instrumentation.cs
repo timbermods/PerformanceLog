@@ -284,13 +284,22 @@ namespace PerformanceLog
         }
 
         /// <summary>
-        /// What running one of these patches costs when it does nothing, by patching a method of our own. Both loops are warmed up first (the first
-        /// call of a method is compiled, and a patched one goes through a freshly made wrapper), and the least of a few rounds is taken, so
-        /// one-off costs and the scheduler do not decide the figure. In the first game recording this read 0 because the unwarmed baseline
-        /// included the compile.
+        /// What each call of the per-call patches (entity ticks, components, watched methods) costs, for overheadUs. Two parts: the bodies of the
+        /// entity tick's prefix and postfix on a call that is not sampled (almost every call; a sampled call's extra cost is charged separately),
+        /// timed directly with the log on; and what Harmony adds to call a prefix and a postfix, by patching a method of our own with empty ones
+        /// of the same shape (patched minus unpatched, never below 0). Up to 0.1.3 only the second part was measured, and every recording says
+        /// patchCallNs 0: a reading of exactly 0 was charged as an assumed 40 ns, one just above 0 (under half a nanosecond) as itself, so overheadUs
+        /// charged the patches either a guess or almost nothing. Both loops of the second part are warmed
+        /// up first (the first call of a method is compiled, and a patched one goes through a freshly made wrapper), and the least of a few rounds
+        /// is taken, so one-off costs and the scheduler do not decide the figure. Every patch call is charged this one figure, so a call of a
+        /// watched method (whose prefix also looks the method up, and needs Harmony to pass __originalMethod) is still charged somewhat less
+        /// than it costs.
         /// </summary>
         internal static void MeasurePatchCost()
         {
+            double body = Probe.MeasureUnsampled(UnsampledEntityCalls);
+            if (body <= 0) Log.Warning("Could not measure what a patch body costs" + (Probe.LastFailure != null ? ": " + Probe.LastFailure : "") + "; overheadUs assumes 40 ns a patch call.");
+            double trampoline = 0;
             try
             {
                 MethodInfo target = Reflect.Own(typeof(Instrumentation), nameof(CostTarget));
@@ -301,9 +310,21 @@ namespace PerformanceLog
                 for (int i = 0; i < 400; i++) CostTarget(i);
                 double patched = TimeCostTarget(repeats, rounds);
                 harmony.Unpatch(target, HarmonyPatchType.All, HarmonyId);
-                Probe.PatchCallTicks = Math.Max(0, patched - baseline);
+                trampoline = Math.Max(0, patched - baseline);
             }
-            catch (Exception e) { Log.Warning("Could not measure what a patch costs: " + e.Message); }
+            catch (Exception e) { Log.Warning("Could not measure what Harmony adds to a patched call (only the patch bodies are counted): " + e.Message); }
+            Probe.PatchBodyTicks = body;
+            Probe.PatchCallTicks = body > 0 ? body + trampoline : 0;
+        }
+
+        /// <summary>The entity tick's prefix and postfix, <paramref name="calls"/> times, as Harmony calls them around a tick that is not sampled.</summary>
+        static void UnsampledEntityCalls(int calls)
+        {
+            for (int i = 0; i < calls; i++)
+            {
+                EntityPrefix(out Sample state);
+                EntityPostfix(null, state);
+            }
         }
 
         /// <summary>Stopwatch ticks for one call of <see cref="CostTarget"/>: the fastest of several rounds.</summary>
@@ -322,8 +343,9 @@ namespace PerformanceLog
         static long costSink;
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         static void CostTarget(int i) { costSink += i; }
-        internal static void CostPrefix(out long __state) { __state = 0; }
-        internal static void CostPostfix(long __state) { costSink += __state; }
+        // The same shape as the entity tick's pair (a Sample handed from prefix to postfix), with nothing in the bodies.
+        internal static void CostPrefix(out Sample __state) { __state = default; }
+        internal static void CostPostfix(Sample __state) { if (__state.On) costSink++; }
 
         // ---- the patch bodies ----
         // Each starts with a read of Probe.Enabled. Nothing here may throw into the game, so anything that reads the game's own objects is

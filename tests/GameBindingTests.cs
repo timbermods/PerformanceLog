@@ -47,6 +47,7 @@ namespace PerformanceLog.Tests
             yield return ("Game: a wrapper passes through exceptions and still times the call", WrapperExceptions);
             yield return ("Game: a wrapper does nothing extra when the log is off", WrapperWhenOff);
             yield return ("Game: patch bodies pair up and hand the scope token from prefix to postfix", PatchBodiesPair);
+            yield return ("Game: the cost charged for each patch call covers what the entity patch's own bodies take on a call that is not sampled", PatchCostCoversTheBodies);
             yield return ("Game: the game's own empty entity bucket is measured by the entity bucket patch", EntityBucketPatch);
             yield return ("Game: a save is tracked from its patch bodies into an event", SaveTracking);
             yield return ("Watch: named methods are found, and the ones that cannot be patched say why", WatchResolution);
@@ -532,6 +533,47 @@ namespace PerformanceLog.Tests
                 Instrumentation.EntityPrefix(out Sample sample);
                 Check(!sample.On);
             }
+        }
+
+        static void PatchCostCoversTheBodies()
+        {
+            Action<string> warnings = Log.WarningSink;
+            Log.WarningSink = _ => { };
+            try
+            {
+                Probe.Stop();
+                Probe.PatchCallTicks = 0;
+                // Harmony cannot patch in this process, so what needs a real patch is not measured here; the rest is.
+                Instrumentation.MeasurePatchCost();
+                double charged = Probe.PatchCallTicks;
+                Check(Probe.PatchBodyTicks > 0, "the bodies were measured");
+                Check(charged >= Probe.PatchBodyTicks, "a patch call is charged its bodies plus what Harmony adds, never less");
+                Check(!Probe.Enabled, "measuring leaves the probe off");
+                Equal(0, Profile.Count, "and leaves no keys behind");
+                // The same bodies timed here directly, the way the game runs them on almost every call: the log on, and the call not one of the
+                // sampled ones (an interval of 4096 samples about one call in 4096; those few cost more, which only makes this figure larger).
+                // The fastest of ten rounds, as the calibration takes the fastest of its rounds: one long loop is slowed by any other program
+                // that takes the CPU for a moment, and that would decide the comparison.
+                double body = double.MaxValue;
+                using (new Rig())
+                {
+                    Profile.Configure(4096, 4096, 1);
+                    const int calls = 100000, rounds = 10;
+                    for (int i = 0; i < calls; i++) { Instrumentation.EntityPrefix(out Sample sample); Instrumentation.EntityPostfix(null, sample); }
+                    for (int round = 0; round < rounds; round++)
+                    {
+                        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                        for (int i = 0; i < calls; i++) { Instrumentation.EntityPrefix(out Sample sample); Instrumentation.EntityPostfix(null, sample); }
+                        body = Math.Min(body, (System.Diagnostics.Stopwatch.GetTimestamp() - t0) / (double)calls);
+                    }
+                }
+                double ns = 1e9 / System.Diagnostics.Stopwatch.Frequency;
+                Console.WriteLine("     charged per patch call " + (charged * ns).ToString("F2") + " ns; the entity patch bodies timed here " + (body * ns).ToString("F2") + " ns");
+                Check(body > 0, "the bodies take some time");
+                // Half, because the two are timed separately and the machine may be busy with other work in between.
+                Check(charged >= 0.5 * body, "each patch call is charged " + (charged * ns).ToString("F2") + " ns, less than its own bodies take (" + (body * ns).ToString("F2") + " ns): overheadUs leaves the patches out");
+            }
+            finally { Log.WarningSink = warnings; }
         }
 
         static void EntityBucketPatch()

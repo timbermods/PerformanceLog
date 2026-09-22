@@ -415,7 +415,7 @@ namespace PerformanceLog
             "A parallel singleton's StartParallelTick on the game thread: scheduling only, the work itself runs on worker threads and is not visible here. Every call is timed.",
             "All the ticks of one kind of entity (a prefab such as a beaver or a farm house). Only every Nth call is timed and the result is scaled up (see 'sampled').",
             "All the ticks of one kind of entity component (a class such as Walker). Only every Nth call is timed and the result is scaled up. Only recorded with Profile = deep.",
-            "One method from the Watch list in the config, timed including everything inside it and every patch on it. Calls are counted exactly and every Nth is timed.",
+            "One method from the Watch list in the config, timed including everything inside it and every patch on it. Calls are counted exactly; the first call in each window and about every Nth after it are timed. N is chosen from the method's own calls in the last window it ran in and the share of the budget it splits with the other watched methods that ran then, so it widens while the method is busy or many watched methods are. It has a row for every window it ran in.",
             "A singleton's Load while the game was loading (one row per singleton, window 0).",
             "A non-singleton loader's LoadNonSingletons while the game was loading (window 0).",
             "A singleton's PostLoad while the game was loading (window 0).",

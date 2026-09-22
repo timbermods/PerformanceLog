@@ -206,8 +206,7 @@ namespace PerformanceLog
                 header.Pipe("capability", "patch", parts[0], parts.Length > 1 ? parts[1] : "", parts.Length > 2 ? parts[2] : "");
             }
             foreach (string result in Watch.Results) { string[] parts = result.Split('|'); header.Pipe("watch", parts[0], parts.Length > 1 ? parts[1] : ""); }
-            header.Pipe("calibration", "clockReadNs", Ns(Probe.ClockReadTicks), "allocReadNs", Ns(Probe.AllocReadTicks), "scopePairNs", Ns(Probe.ScopePairTicks),
-                "samplePairNs", Ns(Probe.SamplePairTicks), "patchCallNs", Ns(Probe.PatchCallTicks));
+            header.Pipe("calibration", Probe.CalibrationParts());
             header.Pipe("sampling", "budgetPercent", config.OverheadBudgetPercent.ToString(CultureInfo.InvariantCulture),
                 "note", "the intervals are chosen again every profile window; profile.csv says how many calls each row rests on");
             header.Pipe("histogram", "frameEdgesMs", string.Join(",", Columns.FrameEdgesMs.Select(e => e.ToString(CultureInfo.InvariantCulture))));
@@ -224,8 +223,6 @@ namespace PerformanceLog
             header.Append(patches);
             return header.Lines;
         }
-
-        static string Ns(double ticks) => (ticks * 1e9 / Stopwatch.Frequency).ToString("F0", CultureInfo.InvariantCulture);
 
         // ---- during the game ----
 

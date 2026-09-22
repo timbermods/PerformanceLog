@@ -471,6 +471,81 @@ class HelperTests(unittest.TestCase):
             s.cleanup()
 
 
+# Entity rows as Performance Log 0.1.3 and older wrote them: the game renames a character loaded from a save to "<template> <name>", and one
+# born during play keeps Unity's "(Clone)". The mod now writes the kind itself.
+OLD_ENTITY_ROWS = (("BeaverAdult(Clone)", 100.0), ("BeaverAdult Malak", 300.0), ("BeaverAdult Zengu", 300.0), ("BeaverChild Malak", 50.0),
+                   ("DistrictCenter.Folktails(Clone)", 150.0))
+NEW_ENTITY_ROWS = (("BeaverAdult", 700.0), ("BeaverChild", 50.0), ("DistrictCenter.Folktails", 150.0))
+
+
+def add_entity_rows(s, rows, windows=8):
+    for w in range(1, windows + 1):
+        s.window(frame_ms=20.0, entMs=5.0)
+        for i, (name, ms) in enumerate(rows):
+            s.profile.append({"kind": "entity", "window": w, "tick": s.tick, "id": i, "calls": 1000, "sampled": 60, "ms": ms, "allocKB": 1,
+                              "maxMs": 0.5, "name": name, "assembly": "", "mod": ""})
+        s.profile.append({"kind": "method", "window": w, "tick": s.tick, "id": 99, "calls": 10, "sampled": 10, "ms": 20.0, "allocKB": 0,
+                          "maxMs": 3, "name": "Some.Type.Method(int)", "assembly": "SomeMod", "mod": "kyler.somemod"})
+
+
+class EntityRollupTests(unittest.TestCase):
+    def test_an_entity_name_is_cut_at_its_first_space_or_bracket(self):
+        for name, kind in (("BeaverAdult Malak", "BeaverAdult"), ("BeaverAdult(Clone)", "BeaverAdult"), (" BeaverAdult (Clone)", "BeaverAdult"),
+                           ("DistrictCenter.Folktails(Clone)", "DistrictCenter.Folktails"), ("BeaverAdult", "BeaverAdult"),
+                           ("BeaverAdultX", "BeaverAdultX"), ("(Clone)", "(Clone)"), ("?", "?"), ("", "")):
+            self.assertEqual(kind, perflog.entity_kind(name), name)
+
+    def test_named_entity_rows_are_rolled_up_to_their_kind(self):
+        s = Synthetic(header={"mod": "0.1.3"})
+        add_entity_rows(s, OLD_ENTITY_ROWS)
+        try:
+            totals = perflog.profile_totals(perflog.load_session(s.write()))
+            self.assertEqual([("entity", "BeaverAdult"), ("entity", "BeaverChild"), ("entity", "DistrictCenter.Folktails"), ("method", "Some.Type.Method(int)")],
+                             sorted(totals), "one row per kind of entity; a watched method keeps its name")
+            adult = totals[("entity", "BeaverAdult")]
+            self.assertAlmostEqual(8 * 700.0, adult.ms)
+            self.assertEqual(8 * 3000, adult.calls)
+            self.assertEqual(8 * 180, adult.sampled)
+            code, text = run("report", s.dir, "--warmup", "0")
+            self.assertEqual(0, code)
+            line = [l for l in text.splitlines() if l.strip().startswith("BeaverAdult ")][0]
+            self.assertIn("78%", line, "adults are 700 of the 900 ms of entity time")
+            self.assertNotIn("Malak", text)
+            self.assertIn("KNOWN ISSUE in Performance Log 0.1.3: " + perflog.ENTITY_SPLIT_NOTE, text,
+                          "the recording's own profile.csv and summary.md still split them, and the report says so")
+        finally:
+            s.cleanup()
+
+    def test_a_recording_whose_entity_rows_are_kinds_gets_no_split_note(self):
+        # A build of the fix that still says 0.1.3 (it is not released yet), and the checked-in fixture the mod's own code wrote.
+        s = Synthetic(header={"mod": "0.1.3"})
+        add_entity_rows(s, NEW_ENTITY_ROWS)
+        try:
+            folder = s.write()
+            self.assertNotIn(perflog.ENTITY_SPLIT_NOTE, perflog.known_issues(perflog.load_session(folder)))
+            code, text = run("report", folder, "--warmup", "0")
+            self.assertEqual(0, code)
+            self.assertNotIn("rows named after single beavers", text)
+        finally:
+            s.cleanup()
+        self.assertEqual("0.1.3", perflog.load_session(WITH_MOD).h("mod"), "the fixture is old enough for the note to be in question")
+        _, text = run("report", WITH_MOD, "--warmup", "10")
+        self.assertNotIn("rows named after single beavers", text)
+
+    def test_an_old_recording_lines_up_with_a_new_one(self):
+        a, b = Synthetic(header={"mod": "0.1.3"}), Synthetic(header={"mod": "0.1.4"})
+        add_entity_rows(a, OLD_ENTITY_ROWS)
+        add_entity_rows(b, NEW_ENTITY_ROWS)
+        try:
+            _, text = run("compare", a.write(), b.write(), "--warmup", "0")
+            self.assertNotIn("(only in", text, "every kind is in both")
+            self.assertNotIn("Only A has these", text)
+            line = [l for l in text.splitlines() if l.strip().startswith("[entity] BeaverAdult ")][0]
+            self.assertIn("+0.00", line)
+        finally:
+            a.cleanup(); b.cleanup()
+
+
 class FindingTests(unittest.TestCase):
     def report(self, synthetic, *extra):
         try:
@@ -637,11 +712,48 @@ class FindingTests(unittest.TestCase):
         s = Synthetic(header={"mod": "0.1.1"})
         for _ in range(6):
             s.window()
-        self.assertNotIn("KNOWN ISSUE", self.report(s), "the version that fixed them has none")
+        text = self.report(s)
+        for fixed, note in perflog.KNOWN_ISSUES:
+            if perflog.version_tuple(fixed) <= (0, 1, 1):
+                self.assertNotIn(note, text, "the version that fixed them does not have them")
+        newest = max((fixed for fixed, _ in perflog.KNOWN_ISSUES), key=perflog.version_tuple)
+        s = Synthetic(header={"mod": newest})
+        for _ in range(6):
+            s.window()
+        self.assertNotIn("KNOWN ISSUE", self.report(s), "the version that fixed the last of them has none")
         s = Synthetic(header={"mod": "something else"})
         for _ in range(6):
             s.window()
         self.assertNotIn("KNOWN ISSUE", self.report(s), "an unreadable version is not guessed at")
+
+    def test_a_recording_whose_patch_cost_read_0_is_told_what_overhead_charged_the_patches(self):
+        old = ["calibration", "clockReadNs", "23", "allocReadNs", "12", "scopePairNs", "109", "samplePairNs", "51", "patchCallNs", "0"]
+        new = ["calibration", "clockReadNs", "23", "allocReadNs", "12", "scopePairNs", "109", "samplePairNs", "51", "patchBodyNs", "6.2", "patchCallNs", "6.9"]
+        understated, guess = "overheadUs understates what the mod itself cost", "overheadUs's charge for the per-call patches"
+        # A 10 s window of 598.8 frames with 1000 patch calls a frame. overheadUs 10 us a frame is 10 ns a patch call, less than the 40 ns the mod
+        # charged when the empty patch read exactly 0, so the reading was above 0 and the patches were charged almost nothing. 50 us a frame is
+        # what the 40 ns charge (plus the other costs) gives, and could also be almost nothing plus a lot of sampling: it proves neither.
+        cheap, dear, none = dict(overheadUs=10.0, patchCalls=598800.0), dict(overheadUs=50.0, patchCalls=598800.0), dict(overheadUs=5.0)
+        for version, calibration, rows, slow, expect in (
+                ("0.1.3", old, cheap, None, understated),
+                ("0.1.1", old, dear, dict(overheadUs=30.0, patchCalls=1000.0), understated),  # one slow frame at 30 ns a call proves it
+                ("0.1.0", old, dear, dict(overheadUs=45.0, patchCalls=1000.0), guess),
+                ("0.1.3", old[:-1] + ["2"], dear, None, understated),                         # read 2 ns: charged that, and the bodies left out
+                ("0.1.3", old, none, None, None),                                             # no patch ran: nothing to say
+                ("0.1.3", new, cheap, None, None),                                            # the bodies were measured
+                ("0.1.3", None, cheap, None, None),
+                ("0.1.4", old, cheap, None, None)):
+            s = Synthetic(header={"mod": version})
+            if calibration:
+                s.pipes.append(calibration)
+            for _ in range(6):
+                s.window(**rows)
+            if slow:
+                s.slow_frame(60.0, **slow)
+            text = self.report(s)
+            case = (version, calibration and calibration[-4:], rows, slow)
+            self.assertEqual(expect == understated, understated in text, case)
+            self.assertEqual(expect == guess, guess in text, case)
 
     def test_the_loadall_counter_bug_of_0_1_0_is_not_reported_as_a_finding(self):
         for version, expect in (("0.1.0", False), ("0.1.1", True)):
@@ -664,6 +776,17 @@ class FindingTests(unittest.TestCase):
         text = self.report(s)
         self.assertRegex(text, r"Timberborn\.SomethingUI\.Panel\s+game\b")
         self.assertRegex(text, r"Other\.Library\.Thing\s+\(unknown\)")
+
+    def test_a_watched_method_window_nobody_timed_is_not_counted_at_0_ms(self):
+        s = Synthetic()
+        for w in range(1, 7):
+            s.window()
+            # Five windows timed at 0.5 ms a call; in the sixth every timed call threw, so the mod wrote the calls with sampled 0 and no time.
+            timed = w <= 5
+            s.profile.append({"kind": "method", "window": w, "tick": s.tick, "id": 3, "calls": 100 if timed else 40, "sampled": 10 if timed else 0,
+                              "ms": 50.0 if timed else 0.0, "allocKB": 0, "maxMs": 0.6 if timed else 0.0, "name": "Some.Mod.Method()", "assembly": "SomeMod", "mod": "somemod"})
+        text = self.report(s)
+        self.assertRegex(text, r"Some\.Mod\.Method\(\).*\b500\.0 us/call.*\(\+40 calls never timed\)")
 
     def test_loading_that_grew_the_heap_is_reported(self):
         s = Synthetic()

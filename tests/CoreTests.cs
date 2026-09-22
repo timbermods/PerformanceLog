@@ -24,7 +24,7 @@ namespace PerformanceLog.Tests
             Probe.Stop();
             Probe.TestClock = () => Now;
             Alloc.UseTestSource(() => Bytes);
-            Probe.ScopePairTicks = 0; Probe.SamplePairTicks = 0; Probe.ExactCallTicks = 0; Probe.AllocPairTicks = 0; Probe.PatchCallTicks = 0;
+            Probe.ScopePairTicks = 0; Probe.SamplePairTicks = 0; Probe.ExactCallTicks = 0; Probe.AllocPairTicks = 0; Probe.PatchCallTicks = 0; Probe.PatchBodyTicks = 0;
             Probe.HeavySampler = null;
             Probe.Start(new ProbeSettings
             {
@@ -92,6 +92,8 @@ namespace PerformanceLog.Tests
             yield return ("Probe: a copy of the session counts does not change when the original does", StatsCloneIsIndependent);
             yield return ("Probe: measuring cost is estimated for each frame", OverheadEstimate);
             yield return ("Probe: calibration measures something and leaves the probe clean", CalibrationWorks);
+            yield return ("Probe: a patch body is timed with the log on and no call sampled, and the probe is left off and clean", UnsampledBodyTiming);
+            yield return ("Header: the calibration line names the patch body and patch call costs, and says when they were not measured", CalibrationLine);
             yield return ("Alloc: a counter is chosen, and a test source is followed", AllocSources);
             yield return ("Milestones: marks are kept in order and safe for the header", MilestoneLines);
             yield return ("PatchBuilder: hot, shared and other patches are listed, the mod's own are only counted", PatchReport);
@@ -199,7 +201,7 @@ namespace PerformanceLog.Tests
             var tiny = new char[8];
             Check(!Profile.Table.TryFormatRow(row, tiny, out _), "a row that does not fit is refused, not cut");
             var text = new System.Text.StringBuilder();
-            int id = Profile.IdFor(ProfileKind.Entity, "Beaver, \"Adult\"|x");
+            int id = Profile.IdFor(ProfileKind.Method, "Beaver, \"Adult\"|x");   // not an entity: an entity is keyed by the text before its first space
             row[3] = id;
             Profile.AppendProfileText(row, text);
             Equal(",Beaver; 'Adult' x,,", text.ToString());
@@ -633,6 +635,63 @@ namespace PerformanceLog.Tests
             Check(Probe.SamplePairTicks >= Probe.ClockReadTicks, "a sampled pair costs at least a clock read");
             Equal(0, Profile.Count, "calibration leaves no keys behind");
             Check(!Probe.Enabled, "and does not switch the probe on");
+        }
+
+        static void UnsampledBodyTiming()
+        {
+            Probe.Stop();
+            Alloc.Init();
+            Profile.Configure(1, 1, 1);
+            bool wasOn = true;
+            int sampled = 0, calls = 0;
+            double ticks = Probe.MeasureUnsampled(n =>
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    wasOn &= Probe.Enabled;
+                    Probe.Count(Counter.PatchCalls);
+                    if (Profile.BeginEntity().On) sampled++;
+                    if (Profile.BeginComponent().On) sampled++;
+                    calls++;
+                }
+            }, 1000, 3);
+            Check(ticks > 0, "the calls took some time");
+            Check(calls > 3000, "a warm-up and three rounds ran: " + calls);
+            Check(wasOn, "the probe was on while they ran, so the bodies took the path they take in a log");
+            Equal(0, sampled, "no call was one of the sampled ones, although the intervals were 1");
+            Check(!Probe.Enabled, "the probe is off afterwards");
+            Equal(0, Profile.Count, "no keys are left behind");
+            Equal(16, Profile.EntityInterval, "the sampling is back to where a log starts it");
+            Check(Probe.MeasureUnsampled(n => throw new InvalidOperationException("broken")) == 0 && !Probe.Enabled, "a body that throws measures 0 and leaves the probe off");
+            using (new Rig())
+            {
+                Equal(0.0, Probe.MeasureUnsampled(n => calls++), "nothing is measured while a log runs");
+                Check(Probe.Enabled, "and the log is left running");
+            }
+        }
+
+        static void CalibrationLine()
+        {
+            double body = Probe.PatchBodyTicks, call = Probe.PatchCallTicks;
+            try
+            {
+                // tools/perflog.py tells a recording that measured the patch bodies from an older one by the patchBodyNs name in this line.
+                double ticksPerNs = Stopwatch.Frequency / 1e9;
+                Probe.PatchBodyTicks = 8.27 * ticksPerNs;
+                Probe.PatchCallTicks = 8.97 * ticksPerNs;
+                string[] parts = Probe.CalibrationParts();
+                Equal("clockReadNs samplePairNs patchBodyNs patchCallNs", string.Join(" ", parts[0], parts[6], parts[8], parts[10]), "names");
+                Equal(12, parts.Length, "six name and value pairs");
+                Equal("8.3", parts[9], "patchBodyNs, to a tenth of a nanosecond");
+                Equal("9.0", parts[11], "patchCallNs, to a tenth of a nanosecond");
+                Probe.PatchBodyTicks = 0;
+                Probe.PatchCallTicks = 0;
+                parts = Probe.CalibrationParts();
+                Equal("unmeasured", parts[9], "patchBodyNs not measured");
+                Equal("unmeasured (40 assumed)", parts[11], "patchCallNs not measured says what overheadUs charges instead");
+                Check(parts.All(p => p.Length > 0 && p.IndexOf('|') < 0 && p.IndexOf(',') < 0 && p.IndexOf('\n') < 0), "no part holds a separator");
+            }
+            finally { Probe.PatchBodyTicks = body; Probe.PatchCallTicks = call; }
         }
 
         // ---- allocation counter, milestones ----
