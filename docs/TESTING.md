@@ -6,14 +6,14 @@ since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (91 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (44 checks).
+`dotnet run --project tests -c Release` (92 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (48 checks).
 
 | What | How |
 |---|---|
 | Frame accounting: slots are exclusive and add up to the frame; unbalanced scopes; other threads ignored; allocation attribution; flags; ticks and buckets; Unity phases; summaries and histograms | Real `Probe` against a scripted clock (`CoreTests`) |
 | The per-frame path allocates nothing | `GC.GetAllocatedBytesForCurrentThread` around 2000 frames; also for a wrapper with the log off |
 | Failure containment: a failing clock switches the probe off, a full ring drops rows and counts them | `CoreTests` |
-| The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution | `ProfileTests` |
+| The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution, entities keyed by kind and not by a beaver's own name (`perflog.py` adds up older recordings' rows the same way) | `ProfileTests`, `test_perflog.EntityRollupTests` |
 | The files: header, columns, invariant number format in any language, text tails, events, a file rewritten whole, an unopenable path, dropped rows, flush on stop | `WriterTests` |
 | `summary.md`, `README.md` and `columns.md` generation | `SummaryTests`, `WriterTests.EndToEnd` |
 | Every patch target exists in the installed game (1.1.2.4), has no exception filter, and takes only parameters Harmony can supply | `GameBindingTests.TargetsResolve` |
@@ -104,6 +104,8 @@ What it shows, and the line that shows it:
    readable text, and that a value changed there actually reaches `Session.Start` — change `SlowFrameMs`, load a save, and check `frames.csv`'s `# thresholdMs`
    header line against what was set. Every 0.1.3 recording so far has the default `# thresholdMs: 50`. (`PerformanceSettings.Load()` against the real
    `ISettings`/`ModRepository`/`ModSettingsOwnerRegistry` is verified in the game, above.)
+8. **Entity rows keyed by kind (not yet played)**: every entity name in the recordings made up to 0.1.3 was `<template>(Clone)` or `<template> <a beaver's name>`,
+   and the checks cover both; that a new recording from a loaded save has one row per kind is step 7 below.
 
 ## Five-minute check in a game
 
@@ -122,7 +124,8 @@ What it shows, and the line that shows it:
    `# capability-final|patchCalls|...` lines at the end say non-zero counts, and none says `never ran`, including `MeteredTickableComponent.Tick (sampled calls)`.
    `singleton wrappers put in place` should be a handful (one or two per array). `# capability|workingSet|...` should say `from Windows`.
    `# capability-final|profilerRecorder|...` and `frameTiming` may legitimately say `never produced a value` in a release build.
-7. `profile.csv` has rows of kind `component`, not just `entity`.
+7. `profile.csv` has rows of kind `component`, not just `entity`, and its `entity` rows are kinds: one `BeaverAdult`, not a `BeaverAdult(Clone)` and a row per beaver
+   (`BeaverAdult Malak`). `summary.md`'s entity table says the same.
 8. Compare the frame rate the game shows with `summary.md`'s mean; they should agree.
 9. Run `python tools/perflog.py report <folder>` and confirm it reads the folder without complaint.
 10. To see the cost, play the same save for the same time at the same speed with the mod turned off in the mod manager and compare the frame rate with something outside the mod (Steam's
