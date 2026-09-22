@@ -398,6 +398,67 @@ def mod_of(session, t):
     return t.mod or ("(unknown)" if t.kind not in ("entity",) else "")
 
 
+# ---------------------------------------------------------------- other mods' patches (the '# patch|' header lines)
+
+# The Harmony id this mod patches under; its own patches are how it measures, not something to point at.
+OWN_OWNER = "kyler.performancelog"
+# The method a singleton row of each kind times: the wrapper calls it, so another mod's patch on it runs inside that row's time.
+SINGLETON_METHOD = {"tick-singleton": "Tick", "update-singleton": "UpdateSingleton", "late-singleton": "LateUpdateSingleton",
+                    "parallel-start": "StartParallelTick"}
+
+
+def patch_map(session):
+    """The '# patch|tag|method|kind|owner|...' header lines as method -> [(tag, kind, owner)], in the order the header lists them. The header
+    lists every method another mod patches, and every hot one (one that runs every tick or frame), up to a limit (patches-truncated)."""
+    out = collections.OrderedDict()
+    for p in session.pipe("patch"):
+        if len(p) >= 4 and p[1]:
+            out.setdefault(p[1], []).append((p[0], p[2], p[3]))
+    return out
+
+
+def other_patchers(entries):
+    """The owners of patches that are not this mod's, each with its kinds of patch, in the order listed."""
+    owners = collections.OrderedDict()
+    for _, kind, owner in entries:
+        if owner and not owner.startswith(OWN_OWNER):
+            kinds = owners.setdefault(owner, [])
+            if kind not in kinds:
+                kinds.append(kind)
+    return owners
+
+
+def singleton_patchers(patches, t):
+    """Other mods whose patches run inside a singleton row's time: the ones patching the method that row's kind times."""
+    method = SINGLETON_METHOD.get(t.kind)
+    return other_patchers(patches.get(t.name + "." + method, [])) if method else {}
+
+
+def short_method(name, width=58):
+    """A method's full name, cut to its class and method when it is long."""
+    if len(name) <= width:
+        return name
+    tail = ".".join(name.split(".")[-2:])
+    return tail if len(tail) <= width else tail[-width:]
+
+
+def hot_patches(p, session, hot, args):
+    """Prints the hot methods (run every tick or frame) that other mods patch, with who patches them and how."""
+    p("   hot methods other mods patch (the patches run inside whatever part of the frame calls the method):")
+    shown = hot if args.all else hot[:args.top]
+    for method, owners in shown:
+        p("     %-58s %s" % (short_method(method), "; ".join("%s (%s)" % (owner, ", ".join(kinds)) for owner, kinds in owners.items())))
+    if len(shown) < len(hot):
+        p("     ... and %d more (--all lists them)" % (len(hot) - len(shown)))
+    if session.h("patches-truncated"):
+        p("     (the header lists only part of the patches: %s)" % session.h("patches-truncated"))
+
+
+def patch_set(session):
+    """Every patch in the header as (method, kind, owner). The tag is left out: it changes when another mod starts patching the same method."""
+    return {(method, kind, owner) for method, entries in patch_map(session).items() for _, kind, owner in entries}
+
+
 # ---------------------------------------------------------------- findings
 
 class Finding:
@@ -794,9 +855,14 @@ def report(session, args, out):
     first = S[0]["tick"] - 1 if S else 0
     totals = profile_totals(session, tick_from=first)
     window_secs = profile_window_seconds(session, body, first) or secs
+    patches = patch_map(session)
+    hot = [(method, owners) for method, owners in ((m, other_patchers(e)) for m, e in patches.items() if any(tag == "hot" for tag, _, _ in e)) if owners]
+    hot.sort(key=lambda h: -len(h[1]))   # methods several mods patch first; otherwise in the header's order (by name)
     if totals and window_secs > 0:
         p("6. WHERE THE TIME GOES, BY SINGLETON, ENTITY KIND AND METHOD (steady state, %.0f s of profile windows)" % window_secs)
         p("   ms/s = milliseconds of game-thread time per second of play; 'calls' are exact for singletons and watched methods, estimated for sampled kinds.")
+        if any(other_patchers(e) for e in patches.values()):
+            p("   A singleton's time includes other mods' patches on the method it times; its row names them ('includes patches by').")
         for kind, title in KIND_TITLES.items():
             rows = sorted((t for t in totals.values() if t.kind == kind), key=lambda t: -t.ms)
             if not rows:
@@ -804,8 +870,10 @@ def report(session, args, out):
             all_ms = sum(t.ms for t in rows)
             p("   %s: %.1f ms/s in all" % (title, all_ms / window_secs))
             for t in rows[:(len(rows) if args.all else args.top)]:
-                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms" % (
-                    short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms))
+                by = singleton_patchers(patches, t)
+                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms%s" % (
+                    short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms,
+                    "  (includes patches by %s)" % ", ".join(by) if by else ""))
         mods = collections.defaultdict(lambda: [0.0, 0.0])
         for t in totals.values():
             if t.kind in ("tick-singleton", "update-singleton", "late-singleton"):
@@ -824,6 +892,11 @@ def report(session, args, out):
             p("   entity component time by mod (sampled; these tick inside entMs, so do not add them to the singletons above):")
             for mod, (ms, kb) in sorted(comp_mods.items(), key=lambda kv: -kv[1][0])[:args.top]:
                 p("     %-34s %8.2f ms/s  %8.1f KB/s" % (mod, ms / window_secs, kb / window_secs))
+        hot_patches(p, session, hot, args)
+        p()
+    elif hot:
+        p("6. HOT METHODS OTHER MODS PATCH (this session has no profile)")
+        hot_patches(p, session, hot, args)
         p()
     watched = [t for t in totals.values() if t.kind == "method"]
     if not watched and session.pipe("watch"):
@@ -899,6 +972,16 @@ def env_differences(a, b):
     ba, bb = {x[0] for x in a.pipe("bootconfig")}, {x[0] for x in b.pipe("bootconfig")}
     if ba != bb:
         lines.append("boot.config differs: only in %s: %s; only in %s: %s" % (a.label, sorted(ba - bb), b.label, sorted(bb - ba)))
+    pa, pb = patch_set(a), patch_set(b)
+    for session, only in ((a, pa - pb), (b, pb - pa)):
+        if not only:
+            continue
+        owners = collections.Counter(owner for _, _, owner in only)
+        examples = sorted(only)[:3]
+        lines.append("only %s has %d patch%s (%s), e.g. %s%s" % (
+            session.label, len(only), "" if len(only) == 1 else "es", ", ".join("%s %d" % kv for kv in sorted(owners.items(), key=lambda kv: (-kv[1], kv[0]))[:4]),
+            "; ".join("%s %s by %s" % (short_method(m), kind, owner) for m, kind, owner in examples),
+            " (the header of one lists only part of its patches)" if a.h("patches-truncated") or b.h("patches-truncated") else ""))
     return lines
 
 

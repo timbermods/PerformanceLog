@@ -236,6 +236,33 @@ class CompareTests(unittest.TestCase):
         self.assertIn("inside the noise", text)
         self.assertNotIn("Only A has these", text)
 
+    def test_patches_that_differ_are_listed(self):
+        a, b = Synthetic(), Synthetic()
+        try:
+            shared = ["patch", "hot", "Timberborn.TickSystem.TickableEntity.Tick", "prefix", "same.mod", "priority=400", "index=0", "before=", "after=", "Same", "Same.P"]
+            a.pipes.append(shared)
+            b.pipes.append(["patch", "shared"] + shared[2:])   # the same patch, listed under another tag, is not a difference
+            a.pipes.append(["patch", "hot", "Timberborn.InputSystem.InputService.UpdateSingleton", "prefix", "old.mod", "priority=400", "index=0", "before=", "after=", "Old", "Old.P"])
+            b.pipes.append(["patch", "other", "Timberborn.Navigation.NavigationSynchronizer.Tick", "postfix", "new.mod", "priority=400", "index=0", "before=", "after=", "New", "New.P"])
+            b.pipes.append(["patch", "other", "Timberborn.Navigation.NavigationSynchronizer.LateUpdateSingleton", "postfix", "new.mod", "priority=400", "index=0", "before=", "after=", "New", "New.P"])
+            for _ in range(8):
+                a.window()
+                b.window()
+            _, text = run("compare", a.write(), b.write(), "--warmup", "0")
+            section = text.split("1. ARE THE TWO SESSIONS COMPARABLE?")[1].split("2. FRAME TIME")[0]
+            only_a = [l for l in section.splitlines() if "only %s has" % os.path.basename(a.dir) in l and "patch" in l]
+            only_b = [l for l in section.splitlines() if "only %s has" % os.path.basename(b.dir) in l and "patch" in l]
+            self.assertEqual(1, len(only_a), section)
+            self.assertIn("1 patch", only_a[0])
+            self.assertIn("old.mod", only_a[0])
+            self.assertIn("InputService.UpdateSingleton", only_a[0])
+            self.assertEqual(1, len(only_b), section)
+            self.assertIn("2 patches", only_b[0])
+            self.assertIn("new.mod 2", only_b[0])
+            self.assertNotIn("same.mod", section, "a patch both have is not a difference")
+        finally:
+            a.cleanup(); b.cleanup()
+
     def test_cautions_for_different_workloads(self):
         a, b = Synthetic(), Synthetic()
         try:
@@ -644,6 +671,41 @@ class FindingTests(unittest.TestCase):
         self.assertNotIn("PanelStack", line(hitch), "the 1 ms one behind it is not named")
         self.assertIn("DistrictCitizenAssigner 6 ms", line(mixed), "5 ms or more is named whatever the share")
         self.assertNotIn("PanelStack", line(mixed))
+
+    def test_singletons_other_mods_patch_are_marked_and_hot_patches_listed(self):
+        s = Synthetic(mods=[("Harmony", "Harmony", "v"), ("some.mod", "Some Mod", "v1"), ("other.mod", "Other Mod", "v1"), ("third.mod", "Third Mod", "v1")])
+
+        def patch(tag, method, kind, owner):
+            s.pipes.append(["patch", tag, method, kind, owner, "priority=400", "index=0", "before=", "after=", owner.split(".")[0], owner + ".Patch." + kind])
+        patch("hot", "Timberborn.InputSystem.InputService.UpdateSingleton", "prefix", "some.mod")
+        patch("hot", "Timberborn.InputSystem.InputService.UpdateSingleton", "finalizer", "some.mod")
+        patch("shared", "Timberborn.Navigation.NavigationSynchronizer.Tick", "prefix", "other.mod")
+        patch("shared", "Timberborn.Navigation.NavigationSynchronizer.Tick", "postfix", "kyler.performancelog")
+        patch("other", "Timberborn.Navigation.NavigationSynchronizer.LateUpdateSingleton", "prefix", "third.mod")   # not the Tick row's method
+        patch("hot", "Timberborn.TickSystem.Ticker.Update", "prefix", "kyler.performancelog")                      # this mod's own
+        patch("hot", "Timberborn.TickSystem.TickableEntity.Tick", "prefix", "other.mod")
+        for w in range(1, 9):
+            s.window(frame_ms=16.7, updMs=3.0, singMs=1.0)
+            for i, (kind, name) in enumerate((("update-singleton", "Timberborn.InputSystem.InputService"), ("tick-singleton", "Timberborn.Navigation.NavigationSynchronizer"),
+                                              ("update-singleton", "Timberborn.CameraSystem.CameraService"))):
+                s.profile.append({"kind": kind, "window": w, "tick": s.tick, "id": i, "calls": 600, "sampled": 600, "ms": 300.0 - 50 * i, "allocKB": 1,
+                                  "maxMs": 1, "name": name, "assembly": name.rsplit(".", 1)[0], "mod": "game"})
+        text = self.report(s)
+        section = text.split("6. WHERE THE TIME GOES")[1].split("7. GARBAGE COLLECTION")[0]
+
+        def row(name):
+            return [l for l in section.splitlines() if l.strip().startswith(name)][0]
+        self.assertIn("some.mod", row("Timberborn.InputSystem.InputService"), "a singleton whose UpdateSingleton another mod patches says so")
+        self.assertIn("other.mod", row("Timberborn.Navigation.NavigationSynchronizer"))
+        self.assertNotIn("third.mod", row("Timberborn.Navigation.NavigationSynchronizer"), "a patch on its LateUpdateSingleton is not in its tick time")
+        self.assertNotIn("kyler.performancelog", row("Timberborn.Navigation.NavigationSynchronizer"), "this mod's own patches are not listed")
+        self.assertNotIn("patch", row("Timberborn.CameraSystem.CameraService"), "an unpatched singleton says nothing")
+        hot = section.split("hot methods other mods patch")[1]
+        self.assertIn("InputService.UpdateSingleton", hot)
+        self.assertIn("some.mod (prefix, finalizer)", hot)
+        self.assertIn("TickableEntity.Tick", hot)
+        self.assertNotIn("Ticker.Update", hot, "a hot method only this mod patches is not listed")
+        self.assertNotIn("LateUpdateSingleton", hot, "only hot methods are listed")
 
     def test_hitches_on_a_rhythm_are_matched_to_the_autosave(self):
         s = Synthetic()
