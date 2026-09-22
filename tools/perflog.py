@@ -59,6 +59,10 @@ KNOWN_ISSUES = [
     ("0.1.1", "prDraw and prBatches are 0: Unity 6 has no counter by those names (its draw calls are split into several). The other columns are unaffected."),
     ("0.1.1", "While the game ran, frames.csv, profile.csv, spikes.csv and events.csv were held open by the mod, so copying or zipping the folder could leave them out "
               "(the folder listing shows size 0). Exit the game first, or read them with shared access."),
+    ("0.1.4", "Entity rows are split by name: a beaver or bot loaded from the save is keyed by its own name ('BeaverAdult <name>'; the game renames characters "
+              "as it loads them) and one born during play by 'BeaverAdult(Clone)', so profile.csv and the summary.md written in the game list hundreds of rows "
+              "named after each beaver and rank beavers far too low. This report adds entity rows up by kind (the name up to its first space or '('); "
+              "the recording's own files do not."),
 ]
 
 GAME_ASSEMBLY_PREFIXES = ("Timberborn.", "Bindito.", "UnityEngine", "Unity.", "System")
@@ -318,18 +322,32 @@ class KeyTotal:
         self.ms = self.kb = self.calls = self.sampled = self.max_ms = 0.0
 
 
+def entity_kind(name):
+    """The kind of entity an entity row's name stands for: the text before its first space or '(', trimmed, or the whole name if that leaves
+    nothing. Up to 0.1.3 the mod keyed a character loaded from a save by its own name ('BeaverAdult Malak') and one born during play by
+    'BeaverAdult(Clone)'; it now applies this same rule itself (Profile.EntityKindOf), so recordings old and new line up. Change both together."""
+    trimmed = name.strip()
+    cut = re.search(r"[ (]", trimmed)
+    kind = trimmed[:cut.start()].strip() if cut else trimmed
+    return kind or name
+
+
 def profile_totals(session, tick_from=0, tick_to=None):
-    """Totals per (kind, name) over the profile windows that end after tick_from (load rows, window 0, are separate)."""
+    """Totals per (kind, name) over the profile windows that end after tick_from (load rows, window 0, are separate). Entity rows are added up
+    by kind (entity_kind)."""
     totals = collections.OrderedDict()
     for r in session.profile:
         if r.get("window", 0) == 0:
             continue
         if r["tick"] < tick_from or (tick_to is not None and r["tick"] > tick_to):
             continue
-        key = (r["kind"], r.get("name", ""))
+        name = r.get("name", "")
+        if r["kind"] == "entity":
+            name = entity_kind(name)
+        key = (r["kind"], name)
         t = totals.get(key)
         if t is None:
-            t = totals[key] = KeyTotal(r["kind"], r.get("name", ""), r.get("mod", ""), r.get("assembly", ""))
+            t = totals[key] = KeyTotal(r["kind"], name, r.get("mod", ""), r.get("assembly", ""))
         t.ms += r["ms"]; t.kb += r["allocKB"]; t.calls += r["calls"]; t.sampled += r["sampled"]; t.max_ms = max(t.max_ms, r["maxMs"])
     return totals
 

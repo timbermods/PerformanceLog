@@ -405,6 +405,64 @@ class HelperTests(unittest.TestCase):
             s.cleanup()
 
 
+# Entity rows as Performance Log 0.1.3 and older wrote them: the game renames a character loaded from a save to "<template> <name>", and one
+# born during play keeps Unity's "(Clone)". The mod now writes the kind itself.
+OLD_ENTITY_ROWS = (("BeaverAdult(Clone)", 100.0), ("BeaverAdult Malak", 300.0), ("BeaverAdult Zengu", 300.0), ("BeaverChild Malak", 50.0),
+                   ("DistrictCenter.Folktails(Clone)", 150.0))
+NEW_ENTITY_ROWS = (("BeaverAdult", 700.0), ("BeaverChild", 50.0), ("DistrictCenter.Folktails", 150.0))
+
+
+def add_entity_rows(s, rows, windows=8):
+    for w in range(1, windows + 1):
+        s.window(frame_ms=20.0, entMs=5.0)
+        for i, (name, ms) in enumerate(rows):
+            s.profile.append({"kind": "entity", "window": w, "tick": s.tick, "id": i, "calls": 1000, "sampled": 60, "ms": ms, "allocKB": 1,
+                              "maxMs": 0.5, "name": name, "assembly": "", "mod": ""})
+        s.profile.append({"kind": "method", "window": w, "tick": s.tick, "id": 99, "calls": 10, "sampled": 10, "ms": 20.0, "allocKB": 0,
+                          "maxMs": 3, "name": "Some.Type.Method(int)", "assembly": "SomeMod", "mod": "kyler.somemod"})
+
+
+class EntityRollupTests(unittest.TestCase):
+    def test_an_entity_name_is_cut_at_its_first_space_or_bracket(self):
+        for name, kind in (("BeaverAdult Malak", "BeaverAdult"), ("BeaverAdult(Clone)", "BeaverAdult"), (" BeaverAdult (Clone)", "BeaverAdult"),
+                           ("DistrictCenter.Folktails(Clone)", "DistrictCenter.Folktails"), ("BeaverAdult", "BeaverAdult"),
+                           ("BeaverAdultX", "BeaverAdultX"), ("(Clone)", "(Clone)"), ("?", "?"), ("", "")):
+            self.assertEqual(kind, perflog.entity_kind(name), name)
+
+    def test_named_entity_rows_are_rolled_up_to_their_kind(self):
+        s = Synthetic(header={"mod": "0.1.3"})
+        add_entity_rows(s, OLD_ENTITY_ROWS)
+        try:
+            totals = perflog.profile_totals(perflog.load_session(s.write()))
+            self.assertEqual([("entity", "BeaverAdult"), ("entity", "BeaverChild"), ("entity", "DistrictCenter.Folktails"), ("method", "Some.Type.Method(int)")],
+                             sorted(totals), "one row per kind of entity; a watched method keeps its name")
+            adult = totals[("entity", "BeaverAdult")]
+            self.assertAlmostEqual(8 * 700.0, adult.ms)
+            self.assertEqual(8 * 3000, adult.calls)
+            self.assertEqual(8 * 180, adult.sampled)
+            code, text = run("report", s.dir, "--warmup", "0")
+            self.assertEqual(0, code)
+            line = [l for l in text.splitlines() if l.strip().startswith("BeaverAdult ")][0]
+            self.assertIn("78%", line, "adults are 700 of the 900 ms of entity time")
+            self.assertNotIn("Malak", text)
+            self.assertIn("named after each beaver", text, "the recording's own summary.md still splits them, and the report says so")
+        finally:
+            s.cleanup()
+
+    def test_an_old_recording_lines_up_with_a_new_one(self):
+        a, b = Synthetic(header={"mod": "0.1.3"}), Synthetic(header={"mod": "0.1.4"})
+        add_entity_rows(a, OLD_ENTITY_ROWS)
+        add_entity_rows(b, NEW_ENTITY_ROWS)
+        try:
+            _, text = run("compare", a.write(), b.write(), "--warmup", "0")
+            self.assertNotIn("(only in", text, "every kind is in both")
+            self.assertNotIn("Only A has these", text)
+            line = [l for l in text.splitlines() if l.strip().startswith("[entity] BeaverAdult ")][0]
+            self.assertIn("+0.00", line)
+        finally:
+            a.cleanup(); b.cleanup()
+
+
 class FindingTests(unittest.TestCase):
     def report(self, synthetic, *extra):
         try:
@@ -523,7 +581,12 @@ class FindingTests(unittest.TestCase):
         s = Synthetic(header={"mod": "0.1.1"})
         for _ in range(6):
             s.window()
-        self.assertNotIn("KNOWN ISSUE", self.report(s), "the version that fixed them has none")
+        self.assertNotIn("four times every frame", self.report(s), "the version that fixed them does not have them")
+        newest = max((fixed for fixed, _ in perflog.KNOWN_ISSUES), key=perflog.version_tuple)
+        s = Synthetic(header={"mod": newest})
+        for _ in range(6):
+            s.window()
+        self.assertNotIn("KNOWN ISSUE", self.report(s), "the version that fixed the last of them has none")
         s = Synthetic(header={"mod": "something else"})
         for _ in range(6):
             s.window()

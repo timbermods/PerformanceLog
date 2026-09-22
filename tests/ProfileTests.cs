@@ -18,6 +18,7 @@ namespace PerformanceLog.Tests
             yield return ("Profile: a slow frame names the singletons that took its time, biggest first", SpikeAttribution);
             yield return ("Profile: an ordinary frame writes no spike rows but still forgets its times", NoSpikeForFastFrames);
             yield return ("Profile: the same class gets the same id, and Reset makes cached ids stale", IdsAreStable);
+            yield return ("Profile: a beaver's own name and Unity's '(Clone)' are counted under the entity's kind, and only for entities", EntityNamesRollUp);
             yield return ("Profile: sampling widens with load and stays inside the budget", SamplingAdapts);
             yield return ("Profile: sampling never goes below one and ignores an unmeasured cost", SamplingBounds);
             yield return ("Profile: load steps are written straight to the file as window 0", LoadRows);
@@ -222,6 +223,53 @@ namespace PerformanceLog.Tests
                 Profile.Reset();
                 Check(Profile.Generation != generation, "Reset changes the generation so cached ids are looked up again");
                 Equal(0, Profile.Count);
+            }
+        }
+
+        static void EntityNamesRollUp()
+        {
+            Prepare(out Rig rig);
+            using (rig)
+            {
+                // The game renames a character loaded from a save to "<template> <name>" before the tick system records its name; one born
+                // during play keeps Unity's "(Clone)". The 0.1.3 recording of a real game had 316 such keys, and beavers ranked far too low.
+                foreach (string name in new[] { "BeaverAdult Malak", "BeaverAdult(Clone)", "BeaverAdult Zengu", "BeaverChild Malak", "DistrictCenter.Folktails(Clone)" })
+                {
+                    Sample s = Profile.BeginEntity();
+                    rig.Advance(1);
+                    Profile.EndEntity(name, s);
+                }
+                Profile.FlushWindow(1, 1, 10, rig.Prof);
+                List<double[]> rows = rig.ProfileRows();
+                string names = string.Join(",", rows.Select(r => Profile.NameOf((int)r[3])).OrderBy(n => n, StringComparer.Ordinal));
+                Equal("BeaverAdult,BeaverChild,DistrictCenter.Folktails", names, "one row per kind of entity");
+                double[] adult = rows.Single(r => Profile.NameOf((int)r[3]) == "BeaverAdult");
+                Equal(3.0, adult[5], "all three adults' samples are in the one row");
+                Near(3, adult[6], .001);
+                int kind = Profile.IdFor(ProfileKind.Entity, "BeaverAdult");
+                Equal((double)kind, adult[3], "a name that is already a kind is the same key");
+                Equal(kind, Profile.IdFor(ProfileKind.Entity, "BeaverAdult Malak"));
+                Equal(kind, Profile.IdFor(ProfileKind.Entity, " BeaverAdult (Clone)"), "spaces around the kind are not part of it");
+                Check(kind != Profile.IdFor(ProfileKind.Entity, "BeaverAdultX"), "only the text after the kind is cut");
+                Equal("(Clone)", Profile.NameOf(Profile.IdFor(ProfileKind.Entity, "(Clone)")), "a name with nothing before the cut keeps itself");
+                Equal("?", Profile.NameOf(Profile.IdFor(ProfileKind.Entity, (string)null)));
+                // tools/perflog.py rolls up older recordings by the same rule; test_perflog.py checks these same cases.
+                foreach ((string name, string expected) in new[] { ("BeaverAdult Malak", "BeaverAdult"), ("BeaverAdult(Clone)", "BeaverAdult"),
+                    (" BeaverAdult (Clone)", "BeaverAdult"), ("DistrictCenter.Folktails(Clone)", "DistrictCenter.Folktails"), ("BeaverAdult", "BeaverAdult"),
+                    ("BeaverAdultX", "BeaverAdultX"), ("(Clone)", "(Clone)"), ("?", "?"), ("", "") })
+                    Equal(expected, Profile.EntityKindOf(name), "'" + name + "'");
+                // Only entities: a watched method's, a load step's or a singleton's name is its own key.
+                Equal("Some.Type.Method(int)", Profile.NameOf(Profile.IdFor(ProfileKind.Method, "Some.Type.Method(int)")));
+                Equal("Some Loader (step)", Profile.NameOf(Profile.IdFor(ProfileKind.Load, "Some Loader (step)")));
+                Equal("Mod.Singleton Thing", Profile.NameOf(Profile.IdFor(ProfileKind.TickSingleton, "Mod.Singleton Thing")));
+                // A name seen once is looked up again on every sampled tick: that must allocate nothing.
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 1000; i++)
+                {
+                    Sample s = Profile.BeginEntity();
+                    Profile.EndEntity(i % 2 == 0 ? "BeaverAdult Malak" : "BeaverAdult(Clone)", s);
+                }
+                Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before, "bytes allocated by 1000 sampled ticks of names already seen");
             }
         }
 

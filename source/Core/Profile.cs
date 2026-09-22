@@ -100,6 +100,7 @@ namespace PerformanceLog
         static readonly List<Entry> entries = new List<Entry>();
         static readonly Dictionary<(ProfileKind, Type), int> idsByType = new Dictionary<(ProfileKind, Type), int>();
         static readonly Dictionary<(ProfileKind, string), int> idsByName = new Dictionary<(ProfileKind, string), int>();
+        static readonly char[] entityKindEnds = { ' ', '(' };
 
         // Per key, for the window being collected.
         static long[] calls = new long[64], timed = new long[64], ticks = new long[64], allocN = new long[64], allocB = new long[64], max = new long[64];
@@ -207,14 +208,36 @@ namespace PerformanceLog
             return id;
         }
 
-        /// <summary>The id of a named key (an entity's prefab, a method), registering it on first use. Game thread only.</summary>
+        /// <summary>The id of a named key (an entity's kind, a method), registering it on first use. Game thread only.</summary>
         public static int IdFor(ProfileKind kind, string name, string assembly = "")
         {
             string key = name ?? "?";
             if (idsByName.TryGetValue((kind, key), out int id)) return id;
-            id = Register(kind, key, assembly ?? "");
+            // An entity is keyed by its kind, not by its own name (see EntityKindOf). The name is remembered as well, so this runs once
+            // per name and every later tick of it is the lookup above, which allocates nothing.
+            string keyName = kind == ProfileKind.Entity ? EntityKindOf(key) : key;
+            if (!idsByName.TryGetValue((kind, keyName), out id))
+            {
+                id = Register(kind, keyName, assembly ?? "");
+                idsByName[(kind, keyName)] = id;
+            }
             idsByName[(kind, key)] = id;
             return id;
+        }
+
+        /// <summary>
+        /// The kind of entity a tickable entity's name stands for: the text before its first space or '(', trimmed, or the whole name if that
+        /// leaves nothing. The tick system records a character's name after the game has renamed one loaded from a save to
+        /// "&lt;template&gt; &lt;its own name&gt;" (NamedEntityGameObjectSynchronizer), while one made during play keeps Unity's "&lt;template&gt;(Clone)",
+        /// so "BeaverAdult Malak" and "BeaverAdult(Clone)" are both "BeaverAdult". tools/perflog.py (entity_kind) applies the same rule to
+        /// recordings made before the mod did, so change both together.
+        /// </summary>
+        internal static string EntityKindOf(string name)
+        {
+            string trimmed = name.Trim();
+            int cut = trimmed.IndexOfAny(entityKindEnds);
+            string kind = cut < 0 ? trimmed : trimmed.Substring(0, cut).Trim();
+            return kind.Length > 0 ? kind : name;
         }
 
         static string SafeAssemblyName(Type type)

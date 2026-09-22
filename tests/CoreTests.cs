@@ -199,7 +199,7 @@ namespace PerformanceLog.Tests
             var tiny = new char[8];
             Check(!Profile.Table.TryFormatRow(row, tiny, out _), "a row that does not fit is refused, not cut");
             var text = new System.Text.StringBuilder();
-            int id = Profile.IdFor(ProfileKind.Entity, "Beaver, \"Adult\"|x");
+            int id = Profile.IdFor(ProfileKind.Method, "Beaver, \"Adult\"|x");   // not an entity: an entity is keyed by the text before its first space
             row[3] = id;
             Profile.AppendProfileText(row, text);
             Equal(",Beaver; 'Adult' x,,", text.ToString());
