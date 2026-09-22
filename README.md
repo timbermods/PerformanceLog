@@ -7,7 +7,7 @@ the game and in other mods. It does nothing else.
 Version **0.1.3** is a **preview**. Its automated checks run against the game's real assemblies. Version 0.1.0 was the first to be played (a 31 minute session with
 nine mods, ending in a normal exit): every patch applied and the recording was complete. That first recording also showed several defects, fixed in 0.1.1; 0.1.2
 added an in-game settings page, and 0.1.3 made the most detailed profile the default. 0.1.1 and 0.1.3 have been played since, and a 44 minute 0.1.3 recording with
-ten mods shows the 0.1.1 fixes and the new defaults working; whether a value changed on the settings page reaches a recording is not verified yet. See
+ten mods shows the new defaults and every 0.1.1 fix a recording can show working; whether a value changed on the settings page reaches a recording is not verified yet. See
 [CHANGELOG.md](CHANGELOG.md) for what changed in each version. If a part fails to start it
 says so in the log and the summary, that part stays off, and the game carries on. Read [docs/TESTING.md](docs/TESTING.md) for what is and is not verified, and
 how to check it in a game in five minutes.

@@ -17,8 +17,8 @@ install is as informative as this mod can make it.
   rather than the depth of any one row, and the budget system above already throttles itself if measuring gets expensive, so there was no
   clear "more detail" case for moving them, only a "more rows" one.
 - Expect a real, measurable increase in the mod's own cost from this alone — deep's component sampling plus double the sampling budget.
-  Nobody had played it when it was released (it has been since: see `docs/TESTING.md`); the five-minute check there now starts by checking `overheadUs`
-  is still reasonable.
+  Nobody had played it when it was released (it has been since: see `docs/TESTING.md`); step 10 of the five-minute check there measures
+  what it costs.
 
 ## 0.1.2 (preview, not yet played)
 

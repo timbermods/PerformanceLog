@@ -2,7 +2,7 @@
 
 Version 0.1.0 was the first to run in a game (the first recording, below); 0.1.1 fixed what that showed, 0.1.2 added an in-game settings page, and 0.1.3
 changed the defaults to `Profile = deep` and a wider sampling budget, for the most detail with nothing configured. 0.1.1 and 0.1.3 have both been played
-since, and a 0.1.3 recording (below) shows the 0.1.1 fixes and the `deep` default working. This is the honest list.
+since, and a 0.1.3 recording (below) shows the `deep` default and every 0.1.1 fix a recording can show working. This is the honest list.
 
 ## Verified by the automated checks
 
@@ -69,7 +69,7 @@ recording says little about the frame rate.
 
 What it shows, and the line that shows it:
 - **The 0.1.1 fixes** (item 1 of the list below until this recording; zipping a folder while the game runs is still there):
-  - Each singleton service is wrapped once: `# capability-final|patchCalls|singleton wrappers put in place|3` in 236918 frames (0.1.0: 488601 in 122150). Every 0.1.1 and
+  - Each singleton service is wrapped once: `# capability-final|patchCalls|singleton wrappers put in place|3` for the whole recording (0.1.0: 488601 in 122150 frames). Every 0.1.1 and
     0.1.3 recording that reached its closing lines says 2 to 5.
   - `workingMB` is 5587 to 7090 in the `S` rows, and `# capability|workingSet|from Windows`.
   - The game's own singletons are labelled `game`: no singleton row in `profile.csv` has an empty `mod`.
