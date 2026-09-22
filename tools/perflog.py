@@ -12,6 +12,7 @@ The report states what the numbers say and what they are consistent with. It end
 evidence it rests on and what to check next, and the tool never claims more than the data supports.
 """
 import argparse
+import bisect
 import collections
 import csv
 import json
@@ -31,6 +32,18 @@ SLOT_MEANING = {
     "otherMs": "the rest: drawing, other scripts, other mods, the system",
 }
 PHASES = ["plTime", "plInit", "plEarly", "plFixed", "plPre", "plUpdate", "plLate", "plPost"]
+# The timed parts that run inside Unity's Update phase (the game's tick loop and its singleton updates). lateMs runs in the LateUpdate phase
+# (plLate); nothing this mod times runs in the phases before Update.
+UPDATE_PHASE_SLOTS = TICK_SLOTS + ["updMs"]
+EARLY_PHASES = ["plTime", "plInit", "plEarly", "plFixed", "plPre"]
+# How otherMs splits by phase: (key, label, what it is). Summary.OtherByPhase in the mod splits the same way.
+OTHER_SPLIT = [
+    ("update", "Update phase, outside the timed parts", "other scripts' Update (the game's and mods' MonoBehaviours) and coroutines"),
+    ("late", "LateUpdate phase, outside lateMs", "other work in Unity's LateUpdate phase: animation, UI Toolkit, scripts' LateUpdate"),
+    ("post", "plPost", "drawing, presenting the frame and the wait for vertical sync"),
+    ("phases", "Unity's other phases", "plTime to plPre: time, input, physics"),
+    ("between", "between the phases", "what falls between Unity's phases"),
+]
 FRAME_EDGES_DEFAULT = [4, 6, 8.5, 11.5, 14, 17.5, 21, 25, 30, 35, 42, 50, 75, 100, 200, 400]
 REQUIRED = ["type", "frame", "tick", "utcMs", "frames", "frameMs", "maxFrameMs", "ticks", "speed", "paused", "saving", "unfocused"] + SLOTS + \
     ["otherMs", "gcDelta", "heapMB", "allocKB", "overheadUs", "probeUs"]
@@ -45,6 +58,10 @@ KIND_TITLES = collections.OrderedDict([
 ])
 # A session whose mean frame is faster than this (50 fps) is not what anyone complains about, so a share of its frame is not a finding.
 SLOW_MEAN_MS = 20.0
+# A singleton is blamed for a slow frame only when it took at least this share of the frame (percent) or this many milliseconds, as in the
+# mod's summary.md (Summary.BlameMinShare, BlameMinMs): the biggest singleton of a frame a save or a collection made slow is a millisecond or two.
+BLAME_MIN_SHARE = 10.0
+BLAME_MIN_MS = 5.0
 LOAD_KINDS = ("load", "load-non-singleton", "post-load", "post-load-non-singleton")
 
 # Up to 0.1.3 the `# calibration|` line's patchCallNs timed an empty patch instead of the patch bodies, and every recording shows 0 there. What
@@ -325,6 +342,106 @@ def seconds_of(rows):
     return sum(r["frameMs"] * r["frames"] for r in rows) / 1000.0
 
 
+def heap_alloc(session):
+    """True when allocation was read from the size of the managed heap (the allocSource capability), which falls at a garbage collection."""
+    return any(len(p) >= 2 and p[1].startswith("GC.GetTotalMemory") for p in session.pipe("capability", "allocSource"))
+
+
+def alloc_unmeasured(session, rows):
+    """The slow frames inside the summary rows `rows` whose allocation was not measured: how many, their milliseconds, and the heap growth
+    they still showed (their positive allocKB, which the rows' allocKB totals hold). With the heap size as the counter a frame with a
+    collection loses what it allocated; its row has gcDelta > 0 or (the heap shrank) a negative allocKB. That holds for recordings of every
+    version. Frames too short to have a row of their own are not known here; they are short."""
+    if not heap_alloc(session) or not rows:
+        return 0, 0.0, 0.0
+    ordered = sorted(rows, key=lambda r: r["frame"])
+    ends = [r["frame"] for r in ordered]
+    count, ms, kb = 0, 0.0, 0.0
+    for f in session.slow:
+        if f["gcDelta"] <= 0 and f["allocKB"] >= 0:
+            continue
+        i = bisect.bisect_left(ends, f["frame"])   # the first window that ends at or after the frame; a window covers (frame - frames, frame]
+        if i < len(ends) and ordered[i]["frame"] - ordered[i]["frames"] < f["frame"]:
+            count += 1
+            ms += f["frameMs"]
+            kb += max(0.0, f["allocKB"])
+    return count, ms, kb
+
+
+def alloc_seconds(session, rows):
+    """Seconds of the rows whose allocation was measured: a rate of allocation divides by these, since the lost frames add nothing to it."""
+    return max(0.0, seconds_of(rows) - alloc_unmeasured(session, rows)[1] / 1000.0)
+
+
+def alloc_rate(session, rows):
+    """KB allocated per second over the rows (allocKB, the heap growth), leaving out the frames whose allocation was not measured: both their
+    time and what growth they still showed, since a collection took away an unknown part of what they allocated."""
+    secs = alloc_seconds(session, rows)
+    return max(0.0, total(rows, "allocKB") - alloc_unmeasured(session, rows)[2]) / secs if secs > 0 else 0.0
+
+
+def alloc_unmeasured_note(session, rows):
+    """What the report says about frames whose allocation was not measured (heap-size counter), or None. The mod counts them over the whole
+    session in its '# capability-final|allocSource|' line; a recording made before it did has only its slow rows to go on. Either way the
+    figures above cover only the rows `rows`, so the note also says how many of the frames are in them."""
+    if not heap_alloc(session):
+        return None
+    counted = None
+    for p in session.pipe("capability-final", "allocSource"):
+        found = re.search(r"not measured in (\d+) frame", "|".join(p))
+        if found:
+            counted = int(found.group(1))
+    source = ""
+    if counted is None:
+        counted = sum(1 for f in session.slow if f["gcDelta"] > 0 or f["allocKB"] < 0)
+        if not counted:
+            return None
+        source = " (this recording does not count them, so these are its slow rows with a collection)"
+        frames = "at least %d frame%s" % (counted, "" if counted == 1 else "s")
+    else:
+        frames = "%d frame%s" % (counted, "" if counted == 1 else "s")
+    inside, inside_ms, _ = alloc_unmeasured(session, rows)
+    scope = ("The per-second figure leaves out the %d slow frame%s (%.1f s) of them in these windows." % (inside, "" if inside == 1 else "s", inside_ms / 1000.0)
+             if inside else "None of the slow ones is in these windows.")
+    return ("allocation not measured in %s in the whole session, each with a collection%s: the heap-size counter falls at one, so what was "
+            "allocated in them is lost. %s" % (frames, source, scope))
+
+
+def phases_measured(session, rows):
+    """True when the recording timed Unity's phases (the playerLoop capability), so otherMs can be split by them."""
+    return all(p in session.columns for p in PHASES) and sum(wmean(rows, p) for p in PHASES) > 0
+
+
+def split_other(r):
+    """otherMs of one row (times per frame) by Unity phase: each phase less the timed parts that run in it, plPost, the phases before Update,
+    and what falls between the phases. The game saves in its LateUpdate and a mod that defers the save to the end of a tick (BeaverBuddies)
+    in Update; the row does not say which, so saveMs is taken out of the phase with more room left. That is the phase it ran in, except for a
+    save shorter than the gap between the two phases' own remainders: then one phase reads high and the other low by up to the save. A summary
+    row that holds both kinds of save is split approximately, and the mod's summary.md (Summary.OtherByPhase) splits the session's mean row,
+    this report each window, so the two can differ by as much in a session that has both."""
+    update = r.get("plUpdate", 0.0) - sum(r[s] for s in UPDATE_PHASE_SLOTS)
+    late = r.get("plLate", 0.0) - r["lateMs"]
+    if r["saveMs"] > 0:
+        if late >= update:
+            late -= r["saveMs"]
+        else:
+            update -= r["saveMs"]
+    parts = collections.OrderedDict([("update", max(0.0, update)), ("late", max(0.0, late)), ("post", r.get("plPost", 0.0)),
+                                     ("phases", sum(r.get(p, 0.0) for p in EARLY_PHASES))])
+    parts["between"] = max(0.0, r["otherMs"] - sum(parts.values()))
+    return parts
+
+
+def other_by_phase(rows):
+    """split_other over summary rows, in ms per frame (each row weighted by its frames)."""
+    frames = sum(r["frames"] for r in rows)
+    out = collections.OrderedDict((key, 0.0) for key, _, _ in OTHER_SPLIT)
+    for r in rows:
+        for key, value in split_other(r).items():
+            out[key] += value * r["frames"]
+    return collections.OrderedDict((k, v / frames) for k, v in out.items()) if frames else out
+
+
 def frame_edges(session):
     for p in session.pipe("histogram", "frameEdgesMs"):
         try:
@@ -441,6 +558,74 @@ def mod_of(session, t):
     return t.mod or ("(unknown)" if t.kind not in ("entity",) else "")
 
 
+# ---------------------------------------------------------------- other mods' patches (the '# patch|' header lines)
+
+# The Harmony id this mod patches under; its own patches are how it measures, not something to point at.
+OWN_OWNER = "kyler.performancelog"
+# The method a singleton row of each kind times: the wrapper calls it, so another mod's patch on it runs inside that row's time.
+SINGLETON_METHOD = {"tick-singleton": "Tick", "update-singleton": "UpdateSingleton", "late-singleton": "LateUpdateSingleton",
+                    "parallel-start": "StartParallelTick"}
+
+
+def patch_map(session):
+    """The '# patch|tag|method|kind|owner|...' header lines as method -> [(tag, kind, owner)], in the order the header lists them. The header
+    lists every method another mod patches, and every hot one (one that runs every tick or frame), up to a limit (patches-truncated)."""
+    out = collections.OrderedDict()
+    for p in session.pipe("patch"):
+        if len(p) >= 4 and p[1]:
+            out.setdefault(p[1], []).append((p[0], p[2], p[3]))
+    return out
+
+
+def other_patchers(entries):
+    """The owners of patches that are not this mod's, each with its kinds of patch, in the order listed."""
+    owners = collections.OrderedDict()
+    for _, kind, owner in entries:
+        if owner and not owner.startswith(OWN_OWNER):
+            kinds = owners.setdefault(owner, [])
+            if kind not in kinds:
+                kinds.append(kind)
+    return owners
+
+
+def singleton_patchers(patches, t):
+    """Other mods whose patches run inside a singleton row's time: the ones patching the method that row's kind times."""
+    method = SINGLETON_METHOD.get(t.kind)
+    return other_patchers(patches.get(t.name + "." + method, [])) if method else {}
+
+
+def short_method(name, width=58):
+    """A method's full name, cut to its class and method when it is long."""
+    if len(name) <= width:
+        return name
+    tail = ".".join(name.split(".")[-2:])
+    return tail if len(tail) <= width else tail[-width:]
+
+
+def hot_patches(p, session, hot, args):
+    """Prints the hot methods (run every tick or frame) that other mods patch, with who patches them and how. Nothing when there are none, and
+    a note instead when the recording could not list the patches (patches-unavailable), so an empty list is not read as 'nothing is patched'."""
+    if session.h("patches-unavailable"):
+        p("   (the patches were not recorded, so this report cannot say which other mods patch what: %s)" % session.h("patches-unavailable"))
+    if not hot:
+        return
+    p("   hot methods other mods patch (the patches run inside whatever part of the frame calls the method):")
+    shown = hot if args.all else hot[:args.top]
+    for method, owners in shown:
+        p("     %-58s %s" % (short_method(method), "; ".join("%s (%s)" % (owner, ", ".join(kinds)) for owner, kinds in owners.items())))
+    if len(shown) < len(hot):
+        p("     ... and %d more (--all lists them)" % (len(hot) - len(shown)))
+    if session.h("patches-truncated"):
+        p("     (the header lists only part of the patches: %s)" % session.h("patches-truncated"))
+
+
+def patch_set(session):
+    """Every other mod's patch in the header as (method, kind, owner). The tag is left out: it changes when another mod starts patching the same
+    method. This mod's own patches are left out as in other_patchers: they follow its Profile setting and version, which compare lists apart."""
+    return {(method, kind, owner) for method, entries in patch_map(session).items() for _, kind, owner in entries
+            if owner and not owner.startswith(OWN_OWNER)}
+
+
 # ---------------------------------------------------------------- findings
 
 class Finding:
@@ -551,7 +736,7 @@ def findings_for(session, args):
             out.append(Finding("high", "Garbage collection causes most of the hitches",
                                "%d of %d slow frames contain a collection (median %.0f ms, worst %.0f ms); the game collects %.1f times a minute and allocates about %.0f KB per second." %
                                (len(gc_rows), len(slow), gm, max(r["frameMs"] for r in gc_rows), total(S, "gcDelta") / (secs / 60) if secs else 0,
-                                total(S, "allocKB") / secs if secs else 0),
+                                alloc_rate(session, S)),
                                gc_advice(session, inc) + "Find what allocates most: the allocation table in the report and allocKB in profile.csv.", key="gc"))
         if save_rows:
             ev = [e for e in session.events if e["kind"] == "save"]
@@ -602,13 +787,41 @@ def findings_for(session, args):
                                "That wait is free: the computer had time to spare. Look for slowness in the slow frames and in the simulation instead."))
         elif other >= 0.5 and mean >= SLOW_MEAN_MS:
             evidence = "%.0f%% of an average frame is outside every part this mod times" % (100 * other)
-            if plpost >= 0.4:
-                evidence += "; %.0f%% of it is Unity's post-late-update phase (drawing, presenting, the wait for vertical sync)" % (100 * plpost)
-            if busy is not None:
-                evidence += "; the game thread was busy for only %.0f%% of the frame" % (100 * busy)
-            display = session.h("display")
-            out.append(Finding("high" if plpost >= 0.4 or (busy is not None and busy < 0.7) else "info", "Most of the frame is not the game's or any mod's code",
-                               evidence + ".", "Likely the graphics card or vertical sync (%s). Check draw calls (prDraw, prSetPass), the resolution and quality settings; a mod is unlikely to be the cause." % (display or "display settings not recorded"), key="gpu"))
+            # Which part holds it decides where to look. The Update and LateUpdate remainders are code that runs every frame; plPost is drawing and
+            # waiting, and Unity can also wait for the last frame to be presented in its first phase (plTime), so the phases before Update and
+            # what falls between phases point at the graphics card or vertical sync as plPost does.
+            split = other_by_phase(S) if phases_measured(session, S) else None
+            biggest = max(("update", "late", "post", "phases", "between"), key=lambda k: split[k]) if split else "post"
+            if biggest in ("update", "late"):
+                evidence += ("; per frame, %.1f ms of it is in Unity's Update phase outside the timed parts, %.1f ms in the LateUpdate phase outside lateMs "
+                             "and %.1f ms in plPost (drawing and the wait for vertical sync)" % (split["update"], split["late"], split["post"]))
+                # A game thread that is mostly idle is waiting inside that phase (on another thread, the disk or the graphics card), not working.
+                idle = busy is not None and busy < 0.7
+                if idle:
+                    evidence += "; the game thread was busy for only %.0f%% of the frame" % (100 * busy)
+                if biggest == "update":
+                    title = "Most of the frame is other work in Unity's Update phase, outside every part this mod times"
+                    check = ("That is code that runs every frame beside the game's tick loop and singletons: the game's own and other mods' scripts "
+                             "(MonoBehaviour Update, coroutines). " +
+                             ("The game thread is idle for much of it, so a script there is waiting: on another thread, the disk or the graphics card. " if idle
+                              else "The graphics card is not what holds the frame. ") +
+                             "Compare a recording without a suspected mod, or time a suspect method with a Watch entry.")
+                else:
+                    title = "Most of the frame is other work in Unity's LateUpdate phase, outside every part this mod times"
+                    check = ("Unity's animation and user interface (UI Toolkit) run in this phase beside scripts' LateUpdate, and grow with what is on screen. "
+                             "Compare a recording with fewer animated characters in view or no panel open, and one without a suspected mod.")
+                out.append(Finding("high" if split[biggest] / mean >= 0.4 else "info", title, evidence + ".", check, key="other-" + biggest))
+            else:
+                if split and biggest == "phases":
+                    evidence += ("; %.0f%% of it is in Unity's phases before Update (plTime to plPre), where Unity also waits for the last frame to be presented"
+                                 % (100 * split["phases"] / mean))
+                if plpost >= 0.4:
+                    evidence += "; %.0f%% of it is Unity's post-late-update phase (drawing, presenting, the wait for vertical sync)" % (100 * plpost)
+                if busy is not None:
+                    evidence += "; the game thread was busy for only %.0f%% of the frame" % (100 * busy)
+                display = session.h("display")
+                out.append(Finding("high" if plpost >= 0.4 or (busy is not None and busy < 0.7) else "info", "Most of the frame is not the game's or any mod's code",
+                                   evidence + ".", "Likely the graphics card or vertical sync (%s). Check draw calls (prDraw, prSetPass), the resolution and quality settings; a mod is unlikely to be the cause." % (display or "display settings not recorded"), key="gpu"))
         if shares["updMs"] >= 0.15 and mean >= SLOW_MEAN_MS * 0.8:
             out.append(Finding("high" if shares["updMs"] >= 0.3 else "info", "Per-frame singleton updates take %.0f%% of a frame (%.1f ms)" % (100 * shares["updMs"], wmean(S, "updMs")),
                                "These run every frame whatever the game speed: the user interface, the camera, input and many mods.",
@@ -697,6 +910,28 @@ def findings_for(session, args):
 
 # ---------------------------------------------------------------- report
 
+def blame_text(frame_row, spikes):
+    """What a slow frame is blamed on in section 5: the singletons that took a real part of it, or that none did and what else the frame had.
+    Empty when spikes.csv has nothing for the frame (no singleton was timed in it)."""
+    ranked = sorted(spikes, key=lambda x: x["rank"])
+    if not ranked:
+        return ""
+    frame_ms = frame_row["frameMs"]
+
+    def share(x):
+        return x["share"] if "share" in x else (100.0 * x["ms"] / frame_ms if frame_ms else 0.0)
+    named = []
+    for x in ranked[:2]:
+        if x["ms"] < BLAME_MIN_MS and share(x) < BLAME_MIN_SHARE:
+            break  # biggest first, so nothing after it is bigger
+        named.append(x)
+    if named:
+        return "  <- " + ", ".join("%s %.0f ms" % (short(x.get("name", "?"), 40), x["ms"]) for x in named)
+    had = [what for what, on in (("a save", frame_row["saving"]), ("a garbage collection", frame_row["gcDelta"] > 0)) if on]
+    return "  <- no singleton stood out (largest %.1f ms, %.1f%% of the frame)%s" % (ranked[0]["ms"], share(ranked[0]),
+                                                                                 "; the frame had " + " and ".join(had) if had else "")
+
+
 def report(session, args, out):
     p = lambda text="": out.write(text + "\n")
     S = steady(session, args.warmup)
@@ -752,6 +987,12 @@ def report(session, args, out):
     ph = {x: wmean(body, x) for x in PHASES if x in session.columns}
     if ph and sum(ph.values()) > 0:
         p("   Unity's phases: " + ", ".join("%s %.2f ms" % (k, v) for k, v in ph.items() if v >= 0.05) + "   (the wait for vertical sync is in one of them, usually plPost)")
+    if phases_measured(session, body):
+        other = wmean(body, "otherMs")
+        split = other_by_phase(body)
+        p("   otherMs by Unity phase (each phase less the timed parts that run in it):")
+        for key, label, meaning in OTHER_SPLIT:
+            p("     %-38s %6.2f ms %4s   %s" % (label, split[key], pct(split[key], other), meaning))
     if wmean(body, "mainCpuMs") > 0:
         p("   the game thread was busy %.0f%% of the frame (%.1f of %.1f ms); the process used %.1f cores' worth" % (
             100 * wmean(body, "mainCpuMs") / mean, wmean(body, "mainCpuMs"), mean, wmean(body, "procCpuMs") / mean if mean else 0))
@@ -784,18 +1025,22 @@ def report(session, args, out):
             why.append("background")
         if r["paused"]:
             why.append("paused")
-        b = sorted(blame.get(int(r["frame"]), []), key=lambda x: x["rank"])[:2]
         p("   frame %-6d tick %-6d %6.0f ms  speed %g  %s%s%s" % (r["frame"], r["tick"], r["frameMs"], r["speed"],
                                                                 "[" + ",".join(why) + "] " if why else "", ", ".join("%s %.0f" % (s, v) for v, s in parts),
-                                                                ("  <- " + ", ".join("%s %.0f ms" % (short(x.get("name", "?"), 40), x["ms"]) for x in b)) if b else ""))
+                                                                blame_text(r, blame.get(int(r["frame"]), []))))
     p()
 
     first = S[0]["tick"] - 1 if S else 0
     totals = profile_totals(session, tick_from=first)
     window_secs = profile_window_seconds(session, body, first) or secs
+    patches = patch_map(session)
+    hot = [(method, owners) for method, owners in ((m, other_patchers(e)) for m, e in patches.items() if any(tag == "hot" for tag, _, _ in e)) if owners]
+    hot.sort(key=lambda h: -len(h[1]))   # methods several mods patch first; otherwise in the header's order (by name)
     if totals and window_secs > 0:
         p("6. WHERE THE TIME GOES, BY SINGLETON, ENTITY KIND AND METHOD (steady state, %.0f s of profile windows)" % window_secs)
         p("   ms/s = milliseconds of game-thread time per second of play; 'calls' are exact for singletons and watched methods, estimated for sampled kinds.")
+        if any(other_patchers(e) for e in patches.values()):
+            p("   A singleton's time includes other mods' patches on the method it times; its row names them ('includes patches by').")
         for kind, title in KIND_TITLES.items():
             rows = sorted((t for t in totals.values() if t.kind == kind), key=lambda t: -t.ms)
             if not rows:
@@ -803,9 +1048,11 @@ def report(session, args, out):
             all_ms = sum(t.ms for t in rows)
             p("   %s: %.1f ms/s in all" % (title, all_ms / window_secs))
             for t in rows[:(len(rows) if args.all else args.top)]:
-                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms%s" % (
+                by = singleton_patchers(patches, t)
+                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms%s%s" % (
                     short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms,
-                    "  (+%d calls never timed)" % t.untimed if t.untimed else ""))
+                    "  (+%d calls never timed)" % t.untimed if t.untimed else "",
+                    "  (includes patches by %s)" % ", ".join(by) if by else ""))
         mods = collections.defaultdict(lambda: [0.0, 0.0])
         for t in totals.values():
             if t.kind in ("tick-singleton", "update-singleton", "late-singleton"):
@@ -824,6 +1071,11 @@ def report(session, args, out):
             p("   entity component time by mod (sampled; these tick inside entMs, so do not add them to the singletons above):")
             for mod, (ms, kb) in sorted(comp_mods.items(), key=lambda kv: -kv[1][0])[:args.top]:
                 p("     %-34s %8.2f ms/s  %8.1f KB/s" % (mod, ms / window_secs, kb / window_secs))
+        hot_patches(p, session, hot, args)
+        p()
+    elif hot or session.h("patches-unavailable"):
+        p("6. HOT METHODS OTHER MODS PATCH (this session has no profile)")
+        hot_patches(p, session, hot, args)
         p()
     watched = [t for t in totals.values() if t.kind == "method"]
     if not watched and session.pipe("watch"):
@@ -833,9 +1085,12 @@ def report(session, args, out):
     p("7. GARBAGE COLLECTION AND MEMORY")
     gc = total(body, "gcDelta")
     p("   %d collections (%.1f per minute); the game allocated about %.0f KB per second (%.0f KB per tick); managed heap %.0f-%.0f MB" % (
-        gc, gc / (seconds_of(body) / 60) if seconds_of(body) else 0, total(body, "allocKB") / seconds_of(body) if seconds_of(body) else 0,
+        gc, gc / (seconds_of(body) / 60) if seconds_of(body) else 0, alloc_rate(session, body),
         total(body, "allocKB") / max(1, sum(r["ticks"] for r in body)), min(r["heapMB"] for r in body if r["heapMB"] > 0) if any(r["heapMB"] > 0 for r in body) else 0,
         max(r["heapMB"] for r in body)))
+    note = alloc_unmeasured_note(session, body)
+    if note:
+        p("   " + note)
     ticks = max(1, sum(r["ticks"] for r in body))
     alloc = {}
     for s in SLOTS:
@@ -874,6 +1129,7 @@ def report_json(session, args):
         "meanFrameMs": mean, "p50": percentile(session, S, 0.5), "p90": percentile(session, S, 0.9), "p99": percentile(session, S, 0.99),
         "slowFrames": len(session.slow), "knownIssues": known_issues(session),
         "slotsMsPerFrame": {s: wmean(S, s) for s in SLOTS + ["otherMs"]},
+        "otherMsByPhase": dict(other_by_phase(S)) if phases_measured(session, S) else None,
         "collections": total(S, "gcDelta"),
         "findings": [{"severity": f.severity, "title": f.title, "evidence": f.evidence, "check": f.check} for f in findings_for(session, args)],
     }
@@ -898,6 +1154,19 @@ def env_differences(a, b):
     ba, bb = {x[0] for x in a.pipe("bootconfig")}, {x[0] for x in b.pipe("bootconfig")}
     if ba != bb:
         lines.append("boot.config differs: only in %s: %s; only in %s: %s" % (a.label, sorted(ba - bb), b.label, sorted(bb - ba)))
+    unrecorded = [s.label for s in (a, b) if s.h("patches-unavailable")]
+    if unrecorded:
+        lines.append("the patches by other mods were not recorded in %s, so they cannot be compared" % " or ".join(unrecorded))
+    pa, pb = (patch_set(a), patch_set(b)) if not unrecorded else (set(), set())
+    for session, only in ((a, pa - pb), (b, pb - pa)):
+        if not only:
+            continue
+        owners = collections.Counter(owner for _, _, owner in only)
+        examples = sorted(only)[:3]
+        lines.append("only %s has %d patch%s (%s), e.g. %s%s" % (
+            session.label, len(only), "" if len(only) == 1 else "es", ", ".join("%s %d" % kv for kv in sorted(owners.items(), key=lambda kv: (-kv[1], kv[0]))[:4]),
+            "; ".join("%s %s by %s" % (short_method(m), kind, owner) for m, kind, owner in examples),
+            " (the header of one lists only part of its patches)" if a.h("patches-truncated") or b.h("patches-truncated") else ""))
     return lines
 
 
@@ -961,7 +1230,7 @@ def compare(a, b, args, out):
     if ta and tb:
         rows.append(("ms per tick (game thread)", sum(wsum(Sa, s) for s in TICK_SLOTS) / ta, sum(wsum(Sb, s) for s in TICK_SLOTS) / tb))
     rows.append(("collections per minute", total(Sa, "gcDelta") / (seconds_of(Sa) / 60) if seconds_of(Sa) else 0, total(Sb, "gcDelta") / (seconds_of(Sb) / 60) if seconds_of(Sb) else 0))
-    rows.append(("allocation KB per second", total(Sa, "allocKB") / seconds_of(Sa) if seconds_of(Sa) else 0, total(Sb, "allocKB") / seconds_of(Sb) if seconds_of(Sb) else 0))
+    rows.append(("allocation KB per second", alloc_rate(a, Sa), alloc_rate(b, Sb)))
     for label, va, vb in rows:
         p("   %-26s %10.2f %10.2f %10s" % (label, va, vb, change(va, vb)))
     speeds_a = collections.defaultdict(list)

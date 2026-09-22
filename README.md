@@ -46,10 +46,11 @@ python tools/perflog.py compare <folder A> <folder B>
 python tools/perflog.py list
 ```
 
-`report` says what stands out, with the evidence and what to check next. `compare` lines up two sessions and says what changed and what else differed
-(different mods, game speed, colony size, computer). `list` shows every session in `Documents\Timberborn\PerformanceLog`, or in a folder you name.
-The tool is also in the release ZIP, in `PerformanceLog\tools`. For a fair comparison, record the
-same save at the same game speed for at least three minutes each, with the window in front, and change one thing.
+`report` says what stands out, with the evidence and what to check next, and names the other mods whose patches run inside a singleton's time.
+`compare` lines up two sessions and says what changed and what else differed (different mods or Harmony patches, game speed, colony size, computer).
+`list` shows every session in `Documents\Timberborn\PerformanceLog`, or in a folder you name. The tool is also in the release ZIP, in
+`PerformanceLog\tools`. For a fair comparison, record the same save at the same game speed for at least three minutes each, with the window in
+front, and change one thing.
 
 ## What it records
 

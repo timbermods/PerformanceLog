@@ -6,13 +6,14 @@ since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (101 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (50 checks).
+`dotnet run --project tests -c Release` (106 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (62 checks).
 
 | What | How |
 |---|---|
 | Frame accounting: slots are exclusive and add up to the frame; unbalanced scopes; other threads ignored; allocation attribution; flags; ticks and buckets; Unity phases; summaries and histograms | Real `Probe` against a scripted clock (`CoreTests`) |
 | The per-frame path allocates nothing | `GC.GetAllocatedBytesForCurrentThread` around 2000 frames; also for a wrapper with the log off |
 | Failure containment: a failing clock switches the probe off, a full ring drops rows and counts them | `CoreTests` |
+| A frame whose allocation counter falls (the heap size at a collection, the source the game gets) is counted as not measured and left out of the allocation rate, not read as 0 | `HeapModeTests`, `tools/test_perflog.py` |
 | The cost charged for each patch call (`patchCallNs`) is at least what the entity patch's own bodies take on a call that is not sampled, timed with the log on and sampling held off (the part Harmony adds needs the game); the `# calibration|` line names both, or says `unmeasured` | `CoreTests.UnsampledBodyTiming`, `CoreTests.CalibrationLine`, `GameBindingTests.PatchCostCoversTheBodies` |
 | The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution, entities keyed by kind and not by a beaver's own name (`perflog.py` adds up older recordings' rows the same way) | `ProfileTests`, `test_perflog.EntityRollupTests` |
 | Watched methods: each is sampled at its own rate, widening with its own load inside the budget, kept through windows it is not called in (so bursts stay inside it too) and coming back down when it runs less, with a row (and at least one timing) for every window it ran in; calls nobody timed get a `sampled` 0 row and stay out of the totals | `WatchSamplingTests`, `test_perflog` |
@@ -139,5 +140,9 @@ What it shows, and the line that shows it:
     or the game's own FPS counter). At the new, deeper defaults the mod costs more than the 0.3-0.8% of a frame the first recording measured at the old ones; the report still warns if
     `overheadUs` + `probeUs` are more than 2% of a frame, and `OverheadBudgetPercent` is the setting to lower if it runs that high. (With `Enabled = false` the mod writes no session at
     all, so there is nothing to `compare`.)
+11. Not yet seen in a game, only in the automated checks with a stand-in counter: the last lines of `frames.csv` should include
+    `# capability-final|allocSource|heap size|...`, saying either `measured in every frame` or `allocation not measured in N frames (X s) with a garbage
+    collection`, where N is at least the number of `F` rows with `gcDelta` above 0 (a save usually brings a collection). `summary.md`'s garbage-collection
+    section should give the same N. In `summary.md`, the parts of **How `otherMs` splits by Unity phase** should add up to `otherMs` within about 0.1 ms.
 
 If something is wrong, send Claude the session folder and the `[PerformanceLog]` lines from `Player.log`.

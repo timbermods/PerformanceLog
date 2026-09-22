@@ -15,6 +15,8 @@ namespace PerformanceLog.Tests
             yield return ("Summary: a session with no profile and no slow frames still renders", NothingSlow);
             yield return ("Summary: component time is rolled up by mod, and load steps are listed slowest first", ComponentAndLoadTables);
             yield return ("Summary: slow frames without a row of their own are said to be counted", SkippedRowsAreExplained);
+            yield return ("Summary: a slow frame's Blame names only a singleton that took a real part of it, else says what the frame had", BlameNeedsARealShare);
+            yield return ("Summary: otherMs is split by Unity phase, each phase less the timed parts that run in it", OtherSplitByPhase);
             yield return ("Summary: long class names are shortened and short ones kept", ShortNames);
             yield return ("Readme: placeholders are filled and no placeholder is left", ReadmePlaceholders);
         }
@@ -116,6 +118,100 @@ namespace PerformanceLog.Tests
                 Check(text.Contains("**100** of those slow frames have no row of their own"), text);
                 stats.SlowRowsSkipped = 0;
                 Check(!Summary.Render(new SummaryInput { SessionId = "ok", Row = Probe.SessionRow(), Stats = stats, Seconds = 60 }).Contains("no row of their own"));
+            }
+            finally { rig.Dispose(); }
+        }
+
+        static void BlameNeedsARealShare()
+        {
+            var rig = new Rig(thresholdMs: 1000);
+            try
+            {
+                for (int i = 0; i < 5; i++) { rig.Advance(16); rig.Frame(); }
+                int animators = Profile.IdFor(ProfileKind.UpdateSingleton, "Timberborn.TimbermeshAnimations.AnimatorRegistry", "Timberborn.TimbermeshAnimations");
+                int panels = Profile.IdFor(ProfileKind.UpdateSingleton, "Timberborn.CoreUI.PanelStack", "Timberborn.CoreUI");
+                int routes = Profile.IdFor(ProfileKind.UpdateSingleton, "LateGamePerformance.RouteMapsBackground", "LateGamePerformance");
+                int districts = Profile.IdFor(ProfileKind.TickSingleton, "Timberborn.GameDistricts.DistrictCitizenAssigner", "Timberborn.GameDistricts");
+                WorstFrame Slow(int frame, double frameMs, double gcDelta, double saveMs, int[] ids, double[] ms)
+                {
+                    var row = new double[Columns.Count];
+                    row[Columns.Type] = Columns.FrameRow; row[Columns.Frame] = frame; row[Columns.FrameMs] = frameMs; row[Columns.GcDelta] = gcDelta;
+                    row[Columns.SlotBase + (int)Slot.Save] = saveMs; row[Columns.Saving] = saveMs > 0 ? 1 : 0;
+                    row[Columns.SlotBase + (int)Slot.Update] = ms.Sum(); row[Columns.OtherMs] = frameMs - saveMs - ms.Sum();
+                    return new WorstFrame { Row = row, TopIds = ids, TopMs = ms };
+                }
+                var input = new SummaryInput { SessionId = "blame", Row = Probe.SessionRow(), Stats = Probe.Stats, Seconds = 60 };
+                // As in the real 0.1.3 session: a save of over a second, and the biggest singleton of the frame took about 1 ms of it.
+                input.Worst.Add(Slow(101, 1142, 1, 1133, new[] { animators }, new[] { 1.4 }));
+                // As in the sample session: a collection, and a singleton that took 1 ms of 132.
+                input.Worst.Add(Slow(102, 132, 1, 0, new[] { panels }, new[] { 1.0 }));
+                // A mod's hitch: one singleton took nearly all of the frame; the one behind it took 1%.
+                input.Worst.Add(Slow(103, 99, 0, 0, new[] { routes, panels }, new[] { 95.0, 1.0 }));
+                // 6 ms of a 215 ms frame is under 10% but over 5 ms: a singleton that long is worth naming in any frame.
+                input.Worst.Add(Slow(104, 215, 1, 0, new[] { districts, panels }, new[] { 6.0, 1.0 }));
+                // A save frame in which no singleton was timed at all: nothing was measured, so nothing is said (as perflog.py's blame_text).
+                input.Worst.Add(Slow(105, 800, 1, 790, new int[0], new double[0]));
+                string text = Summary.Render(input);
+                string Row(int frame) => text.Split('\n').Single(l => l.StartsWith("| " + frame + " | "));
+
+                string save = Row(101), gc = Row(102), hitch = Row(103), mixed = Row(104);
+                Check(!save.Contains("AnimatorRegistry"), "a 1 ms singleton is not blamed for a 1142 ms save: " + save);
+                Check(save.Contains("no singleton stood out") && save.Contains("save"), "the save frame says no singleton stood out, and that it had a save: " + save);
+                Check(!gc.Contains("PanelStack"), "a 1 ms singleton is not blamed for a 132 ms collection: " + gc);
+                Check(gc.Contains("no singleton stood out") && gc.Contains("garbage collection"), "the collection frame says so: " + gc);
+                Check(hitch.Contains("RouteMapsBackground 95"), "the singleton that took the frame is named: " + hitch);
+                Check(!hitch.Contains("PanelStack") && !hitch.Contains("stood out"), "and only it: " + hitch);
+                Check(mixed.Contains("DistrictCitizenAssigner 6") && !mixed.Contains("PanelStack"), "5 ms or more is named whatever the share: " + mixed);
+                string untimed = Row(105);
+                Check(!untimed.Contains("stood out"), "a frame with no singleton timed does not say none stood out: " + untimed);
+            }
+            finally { rig.Dispose(); }
+        }
+
+        static void OtherSplitByPhase()
+        {
+            var rig = new Rig(thresholdMs: 1000);
+            try
+            {
+                // A 20 ms frame, laid out as Unity runs it: 0.2 ms of plTime; a 9 ms Update phase holding 2 ms of singleton updates and 4 ms of
+                // entity ticks; a 2.5 ms LateUpdate phase holding 0.5 ms of late singletons; 0.8 ms between the phases; 7.5 ms of plPost.
+                for (int i = 0; i < 5; i++)
+                {
+                    Probe.PhaseMark(0, true); rig.Advance(0.2); Probe.PhaseMark(0, false);
+                    Probe.PhaseMark(5, true);
+                    long update = Probe.Begin(Slot.Update); rig.Advance(2); Probe.End(update);
+                    long entities = Probe.Begin(Slot.Entities); rig.Advance(4); Probe.End(entities);
+                    rig.Advance(3);
+                    Probe.PhaseMark(5, false);
+                    Probe.PhaseMark(6, true);
+                    long late = Probe.Begin(Slot.LateUpdate); rig.Advance(0.5); Probe.End(late);
+                    rig.Advance(2);
+                    Probe.PhaseMark(6, false);
+                    rig.Advance(0.8);
+                    Probe.PhaseMark(7, true); rig.Advance(7.5); Probe.PhaseMark(7, false);
+                    rig.Frame();
+                }
+                double[] row = Probe.SessionRow();
+                Near(13.5, row[Columns.OtherMs], .001, "otherMs is the time no part covers");
+                string text = Summary.Render(new SummaryInput { SessionId = "phases", Row = row, Stats = Probe.Stats, Seconds = 1 });
+                Check(text.Contains("How `otherMs` splits by Unity phase"), "the split is not in the summary");
+                string Line(string summary, string start) => summary.Split('\n').Single(l => l.StartsWith("| " + start));
+                Check(Line(text, "Update phase").Contains("| 3.00 |"), "the Update phase less the timed parts in it: " + Line(text, "Update phase"));
+                Check(Line(text, "LateUpdate phase").Contains("| 2.00 |"), "the LateUpdate phase less lateMs: " + Line(text, "LateUpdate phase"));
+                Check(Line(text, "LateUpdate phase").Contains("other work in Unity's LateUpdate phase"), "and it is not called mods' work");
+                Check(Line(text, "`plPost`:").Contains("| 7.50 |"), Line(text, "`plPost`:"));
+                Check(Line(text, "Unity's other phases").Contains("| 0.20 |"), Line(text, "Unity's other phases"));
+                Check(Line(text, "Between the phases").Contains("| 0.80 |"), Line(text, "Between the phases"));
+
+                // A save is taken out of the phase it ran in: LateUpdate for the game's own, Update when a mod defers it to the end of a tick.
+                foreach (int phase in new[] { 6, 5 })
+                {
+                    double[] saved = (double[])row.Clone();
+                    saved[Columns.SlotBase + (int)Slot.Save] = 3; saved[Columns.PhaseBase + phase] += 3; saved[Columns.FrameMs] += 3;
+                    string withSave = Summary.Render(new SummaryInput { SessionId = "save", Row = saved, Stats = Probe.Stats, Seconds = 1 });
+                    Check(Line(withSave, "Update phase").Contains("| 3.00 |") && Line(withSave, "LateUpdate phase").Contains("| 2.00 |"),
+                        "a save in " + Columns.PhaseNames[phase] + " is taken out of that phase: " + Line(withSave, "Update phase") + " / " + Line(withSave, "LateUpdate phase"));
+                }
             }
             finally { rig.Dispose(); }
         }

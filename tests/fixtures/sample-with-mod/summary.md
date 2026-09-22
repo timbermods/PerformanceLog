@@ -55,6 +55,16 @@ Unity's phases of a frame (the wait for vertical sync is in one of them, usually
 | `plUpdate` | 3.75 | 22.3% |
 | `plPost` | 12.75 | 76.0% |
 
+How `otherMs` splits by Unity phase (each phase less the timed parts that run in it):
+
+| Part of `otherMs` | ms per frame | Share of `otherMs` |
+|---|---|---|
+| Update phase outside the timed parts: other scripts' Update (the game's and mods' MonoBehaviours) and coroutines | 0.02 | 0.1% |
+| LateUpdate phase outside `lateMs`: other work in Unity's LateUpdate phase (animation, UI Toolkit, scripts' LateUpdate) | 0.00 | 0.0% |
+| `plPost`: drawing, presenting the frame and the wait for vertical sync | 12.75 | 98.2% |
+| Unity's other phases (`plTime` to `plPre`: time, input, physics) | 0.20 | 1.5% |
+| Between the phases | 0.02 | 0.2% |
+
 ## Simulation ticks
 
 - 2440 ticks in 300 s, so 8.1 ticks per second on average. The game's tick is 0.30 s of game time, so at speed 1 it runs 3.3 ticks per second, proportionally more at higher speeds.
@@ -139,19 +149,19 @@ Processor time was not available on this computer.
 
 ## The slowest frames
 
-`frames.csv` has a row for every slow frame and `spikes.csv` the biggest contributors to each; these are the worst 9. `Biggest parts` are the timed slots of the frame; `Blame` are the singletons that spent the most time in it.
+`frames.csv` has a row for every slow frame and `spikes.csv` the biggest contributors to each; these are the worst 9. `Biggest parts` are the timed slots of the frame; `Blame` names the singletons that took at least 10% of the frame or 5 ms, biggest first. When none did, it says so, and whether the frame had a save or a garbage collection, which no singleton's time shows.
 
 | Frame | Tick | Frame ms | Speed | Ticks | GC | Save | Biggest parts | Blame |
 |---|---|---|---|---|---|---|---|---|
-| 7140 | 795 | 437 | 3 | 1 |  | yes | saveMs 430, entMs 2, updMs 2 | Timberborn.WaterSystem.WaterSimulator 1, Timberborn.CoreUI.PanelStack 1, Timberborn.Navigation.NavigationSynchronizer 0 |
-| 5099 | 454 | 132 | 3 | 0 | yes |  | otherMs 128, entMs 2, updMs 2 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, LateGamePerformance.RouteMapsBackground 0 |
-| 1499 | 83 | 125 | 1 | 0 | yes |  | otherMs 122, updMs 2, entMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, LateGamePerformance.RouteMapsBackground 0 |
-| 2599 | 144 | 124 | 1 | 0 | yes |  | otherMs 121, updMs 2, entMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, LateGamePerformance.RouteMapsBackground 0 |
-| 3899 | 253 | 112 | 3 | 0 | yes |  | otherMs 108, entMs 2, updMs 2 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, LateGamePerformance.RouteMapsBackground 0 |
-| 6799 | 738 | 107 | 3 | 1 | yes |  | otherMs 100, entMs 2, singMs 2 | Timberborn.WaterSystem.WaterSimulator 1, Timberborn.CoreUI.PanelStack 1, Timberborn.Navigation.NavigationSynchronizer 0 |
-| 699 | 38 | 105 | 1 | 0 | yes |  | otherMs 102, updMs 2, entMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, LateGamePerformance.RouteMapsBackground 0 |
-| 4699 | 387 | 99 | 3 | 0 |  |  | updMs 97, entMs 2, otherMs 0 | LateGamePerformance.RouteMapsBackground 95, Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0 |
-| 3299 | 183 | 97 | 1 | 0 |  |  | updMs 96, entMs 1, otherMs 0 | LateGamePerformance.RouteMapsBackground 95, Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0 |
+| 7140 | 795 | 437 | 3 | 1 |  | yes | saveMs 430, entMs 2, updMs 2 | no singleton stood out (largest 1.2 ms, 0.3% of the frame); the frame had a save |
+| 5099 | 454 | 132 | 3 | 0 | yes |  | otherMs 128, entMs 2, updMs 2 | no singleton stood out (largest 0.9 ms, 0.7% of the frame); the frame had a garbage collection |
+| 1499 | 83 | 125 | 1 | 0 | yes |  | otherMs 122, updMs 2, entMs 1 | no singleton stood out (largest 0.9 ms, 0.7% of the frame); the frame had a garbage collection |
+| 2599 | 144 | 124 | 1 | 0 | yes |  | otherMs 121, updMs 2, entMs 1 | no singleton stood out (largest 1.0 ms, 0.8% of the frame); the frame had a garbage collection |
+| 3899 | 253 | 112 | 3 | 0 | yes |  | otherMs 108, entMs 2, updMs 2 | no singleton stood out (largest 0.9 ms, 0.8% of the frame); the frame had a garbage collection |
+| 6799 | 738 | 107 | 3 | 1 | yes |  | otherMs 100, entMs 2, singMs 2 | no singleton stood out (largest 1.1 ms, 1.0% of the frame); the frame had a garbage collection |
+| 699 | 38 | 105 | 1 | 0 | yes |  | otherMs 102, updMs 2, entMs 1 | no singleton stood out (largest 1.1 ms, 1.0% of the frame); the frame had a garbage collection |
+| 4699 | 387 | 99 | 3 | 0 |  |  | updMs 97, entMs 2, otherMs 0 | LateGamePerformance.RouteMapsBackground 95 |
+| 3299 | 183 | 97 | 1 | 0 |  |  | updMs 96, entMs 1, otherMs 0 | LateGamePerformance.RouteMapsBackground 95 |
 
 ## What each measurement source could do
 
