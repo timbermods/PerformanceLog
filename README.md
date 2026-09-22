@@ -4,9 +4,11 @@ A Timberborn 1.1 mod (built against **1.1.2.4**) that measures **where the game'
 person, or an AI assistant such as Claude, can read to find out why a game is slow. It is a diagnostic tool for finding performance problems in
 the game and in other mods. It does nothing else.
 
-Version **0.1.2** is a **preview**. Its automated checks run against the game's real assemblies, and version 0.1.0 has been played once (a 31 minute session with
+Version **0.1.3** is a **preview**. Its automated checks run against the game's real assemblies. Version 0.1.0 was the first to be played (a 31 minute session with
 nine mods, ending in a normal exit): every patch applied and the recording was complete. That first recording also showed several defects, fixed in 0.1.1; 0.1.2
-adds an in-game settings page and has not itself been played yet. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version. If a part fails to start it
+added an in-game settings page, and 0.1.3 made the most detailed profile the default. 0.1.1 and 0.1.3 have been played since, and a 44 minute 0.1.3 recording with
+ten mods shows the new defaults and every 0.1.1 fix a recording can show working; whether a value changed on the settings page reaches a recording is not verified yet. See
+[CHANGELOG.md](CHANGELOG.md) for what changed in each version. If a part fails to start it
 says so in the log and the summary, that part stays off, and the game carries on. Read [docs/TESTING.md](docs/TESTING.md) for what is and is not verified, and
 how to check it in a game in five minutes.
 
@@ -134,7 +136,8 @@ Install the .NET 8 SDK and Python 3, and have Timberborn (and the Harmony Worksh
 .\build.ps1 -GameDir 'C:\Program Files (x86)\Steam\steamapps\common\Timberborn'
 ```
 
-builds the mod, runs the checks, and creates `dist\PerformanceLog-0.1.2.zip`. `.\build.ps1 -Install` also copies it into your `Mods` folder. The checks alone:
+builds the mod, runs the checks, and creates `dist\PerformanceLog-<version>.zip` (the version in `packaging/manifest.json`). `.\build.ps1 -Install` also copies it into
+your `Mods` folder. The checks alone:
 
 ```
 dotnet run --project tests -c Release
