@@ -112,14 +112,21 @@ method and tagged with its mod, and a `# watch|...|auto|...` line in the `frames
 It only adds its own timing patch around each patch method: no other mod's patch is removed, reordered or changed. It is off by default because every
 call of a watched method pays for the watch, and some of these run tens of thousands of times a second or more; compare `overheadUs` with it on and off. A
 patch another mod makes after the game has loaded is not seen, and a very small patch method may have been copied into the method it patches by the
-runtime, where no watch can see it (`# capability-final|autoWatch|` lists any that were never seen called).
+runtime, where no watch can see it (`# capability-final|autoWatch|` lists any that were never seen called). A prefix marked `(can replace it)` may skip
+the game's method and do its work itself, so its time is that work done instead of the game's, not on top of it.
+
+With BeaverBuddies, making any Harmony patch uses up some of the game's random numbers (BeaverBuddies makes `Guid.NewGuid` draw from them, and Harmony
+calls it for every patch), and the auto watch patches after the game has been seeded for co-op. It therefore puts the random state back exactly as it
+was once its patches are made, so the game plays out the same with it on or off and co-op players may still set it differently. That is reasoned from
+the code and not yet seen in a two-player game (`docs/TESTING.md`, item 10).
 
 ## Working with other mods
 
 The mod puts a timing wrapper in front of each of the game's singletons, but only on the first tick and first frame of a game, after every other mod's `Load` patches have run, so a mod that looks at
 those singletons (BeaverBuddies reorders the once-per-tick ones by their type) still sees the game's own and tick order is what it would be without this mod. It never replaces a game method and
 never skips the original. When another mod defers the game's save to the end of a tick (BeaverBuddies does), the `queued save` event reads about 0 ms and the real one is the `save (writing the world)`
-event.
+event. With `AutoWatch = true` it also puts its own timing prefix and postfix (Harmony id `kyler.performancelog.watch`) around other mods' patch methods on hot methods, when the
+first game loads; the other mods' patches, and the order they run in, stay as they were.
 
 ## What it costs, and what it cannot see
 

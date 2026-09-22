@@ -91,8 +91,11 @@ Start by writing down what the complaint is, because the causes differ:
   `Tick`, `UpdateSingleton`, `LateUpdateSingleton` or `StartParallelTick`, an entity's or component's `Tick`, whose time is otherwise inside a row that
   names the game or the singleton's own mod), then the rest of the hot methods, in name order, in the Watch slots the config's `Watch` entries left
   (40 in all); the `# watch|` lines of the ones left out say why. A patch method's time is inside the row of what it patches, so do not add the two.
-  One that `# capability-final|autoWatch|` lists as never seen called was either not called or so small that the runtime copied it into the method it
-  patches, where no watch can see it: a missing row there is not a measurement of 0.
+  One that `# capability-final|autoWatch|` lists as never seen called was either not called, called only off the game thread (the watch times the game
+  thread only), or so small that the runtime copied it into the method it patches, where no watch can see it: a missing row there is not a measurement of 0.
+  A `# watch|` line that says `(can replace it)` is a prefix that returns a bool: when it returns false the game's own method does not run, and the
+  prefix's row holds the work it did instead, so that time is the mod doing the game's job, not cost on top of it (compare a recording without that
+  mod to see what it saves or costs in all). A prefix that replaces a tick loop (`TickableBucketService.TickBuckets`, say) holds nearly the whole tick.
 - To be sure it is a mod, **compare two recordings** of the same save at the same speed with and without it:
   `python tools/perflog.py compare <folder A> <folder B>` (in the Performance Log repository). Say what else differed.
 

@@ -64,7 +64,8 @@ namespace PerformanceLog
                 Instrumentation.ResetForSession();
                 // The one moment for the auto watch's patches: every mod has started and the game has loaded, so Harmony's registry holds
                 // the patches it looks for, and nothing ticks yet. Only the first log makes them; they stay for the next save, as the Watch
-                // entries' do. Before the header is written, which lists them.
+                // entries' do. Before the header is written, which lists them. BeaverBuddies has already seeded the game's random numbers
+                // by now, and making a patch draws from them under BeaverBuddies; AutoInstall puts them back (Watch.KeepUnityRandom).
                 if (cfg.AutoWatch)
                 {
                     Watch.AutoInstall();

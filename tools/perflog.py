@@ -827,7 +827,7 @@ def report(session, args, out):
         p()
     watched = [t for t in totals.values() if t.kind == "method"]
     if not watched and session.pipe("watch"):
-        p("   (Watch entries were configured, but none produced rows: %s)" % "; ".join("|".join(w) for w in session.pipe("watch")[:3]))
+        p("   (watched methods were set up (Watch entries or AutoWatch), but none produced rows: %s)" % "; ".join("|".join(w) for w in session.pipe("watch")[:3]))
         p()
 
     p("7. GARBAGE COLLECTION AND MEMORY")
@@ -1007,6 +1007,8 @@ def compare(a, b, args, out):
         for delta, k, va, vb, t in movers[:args.top]:
             note = "  (only in B)" if k not in pa else "  (only in A)" if k not in pb else ""
             p("   %-58s %-22s %9.2f %9.2f %+9.2f%s" % ("[%s] %s" % (k[0].split("-")[0], short_key(k[0], k[1], 52)), (mod_of(a, t) or "")[:22], va, vb, delta, note))
+        if any(k[0] == "method" for _, k, _, _, _ in movers[:args.top]):
+            p("   [method] rows are watched methods (Watch or AutoWatch): their time is inside the row of whatever runs them, so it is not extra time.")
         mods = collections.defaultdict(lambda: [0.0, 0.0])
         for k, t in pa.items():
             if k[0] in ("tick-singleton", "update-singleton", "late-singleton"):
@@ -1061,12 +1063,20 @@ def compare_pointers(a, b, Sa, Sb, diffs, cautions, rows, movers=()):
     for s in biggest:
         if abs(sb[s] - sa[s]) >= 0.1:
             lines.append("Most of the difference is in %s (%s): %.2f ms per frame in A, %.2f ms in B." % (s, SLOT_MEANING[s], sa[s], sb[s]))
-    gone = [(k, va_) for _, k, va_, vb_, t in movers if vb_ == 0 and va_ >= 0.5]
-    added = [(k, vb_) for _, k, va_, vb_, t in movers if va_ == 0 and vb_ >= 0.5]
+    # A watched method's time is already inside the row of whatever runs it (a patch method's inside the method it patches), in both
+    # recordings, so one that only one side watched is a difference in what was measured, not in what the game did.
+    gone = [(k, va_) for _, k, va_, vb_, t in movers if vb_ == 0 and va_ >= 0.5 and k[0] != "method"]
+    added = [(k, vb_) for _, k, va_, vb_, t in movers if va_ == 0 and vb_ >= 0.5 and k[0] != "method"]
     if gone:
         lines.append("Only A has these (the ones above 0.5 ms/s): " + "; ".join("%s (%.1f ms/s)" % (short_key(k[0], k[1], 48), v) for k, v in gone[:4]) + ". Time they took is time B does not spend.")
     if added:
         lines.append("Only B has these (the ones above 0.5 ms/s): " + "; ".join("%s (%.1f ms/s)" % (short_key(k[0], k[1], 48), v) for k, v in added[:4]) + ". Time B spends that A does not.")
+    for side, watched in (("A", [(k, va_) for _, k, va_, vb_, t in movers if vb_ == 0 and va_ >= 0.5 and k[0] == "method"]),
+                          ("B", [(k, vb_) for _, k, va_, vb_, t in movers if va_ == 0 and vb_ >= 0.5 and k[0] == "method"])):
+        if watched:
+            lines.append("Only %s watched these methods (the ones above 0.5 ms/s): %s. Their time is inside the rows of what runs them in both recordings, so "
+                         "it is not time only %s spends: the Watch or AutoWatch settings differ." % (
+                             side, "; ".join("%s (%.1f ms/s)" % (short_key(k[0], k[1], 48), v) for k, v in watched[:4]), side))
     only_a = [m for m in a.mods if m not in b.mods]
     only_b = [m for m in b.mods if m not in a.mods]
     if only_a or only_b:

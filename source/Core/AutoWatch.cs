@@ -25,6 +25,11 @@ namespace PerformanceLog
         /// entity's or component's Tick. A patch there is inside that row, which names the game or the singleton's own mod, not the patching mod.
         /// </summary>
         public bool ProfileRow;
+        /// <summary>
+        /// A prefix that returns bool: it can return false and skip the method it patches (and every later prefix), doing that work itself.
+        /// Its time is then work done instead of the game's, not on top of it.
+        /// </summary>
+        public bool CanReplace;
         /// <summary>Why the patch method cannot be watched, said the way Watch says it for a config entry; null if it can be.</summary>
         public string Refused;
         /// <summary>The game side's handle on the patch method. Carried through, never read here.</summary>
@@ -36,7 +41,10 @@ namespace PerformanceLog
     {
         /// <summary>The patch (the first in the order, when the patch method is on several hot methods).</summary>
         public AutoWatchCandidate Candidate;
-        /// <summary>Every hot method the patch method is on, as "prefix on Namespace.Type.Method", joined with "; ".</summary>
+        /// <summary>
+        /// Every hot method the patch method is on, as "prefix on Namespace.Type.Method", joined with "; ". A prefix that can skip the method
+        /// it patches (it returns bool) says so: "prefix on Namespace.Type.Method (can replace it)".
+        /// </summary>
         public string On;
         /// <summary>"watching", or why not.</summary>
         public string Status;
@@ -48,6 +56,7 @@ namespace PerformanceLog
         public const string Watching = "watching";
         public const string NamedByWatch = "watched by a Watch entry";
         public const string NoFreeSlot = "skipped: no free Watch slot";
+        public const string CanReplaceNote = "(can replace it)";
 
         sealed class Group
         {
@@ -82,7 +91,7 @@ namespace PerformanceLog
                 int tier = c.ProfileRow ? 0 : PatchFormat.IsHot(c.TypeName, c.MethodName) ? 1 : -1;
                 if (tier < 0) continue;
                 if (!groups.TryGetValue(c.Label, out Group g)) groups[c.Label] = g = new Group { Label = c.Label, Tier = int.MaxValue };
-                g.On.Add(c.Kind + " on " + c.Target);
+                g.On.Add(c.Kind + " on " + c.Target + (c.CanReplace && kindOrder == 0 ? " " + CanReplaceNote : ""));
                 if (Before(c, tier, kindOrder, g)) { g.First = c; g.Tier = tier; g.KindOrder = kindOrder; }
                 // Why a patch method cannot be watched does not depend on the hot method it is on; if the records disagree, the same one is kept whatever their order.
                 if (c.Refused != null && (g.Refused == null || string.CompareOrdinal(c.Refused, g.Refused) < 0)) g.Refused = c.Refused;

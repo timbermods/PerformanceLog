@@ -162,7 +162,8 @@ namespace PerformanceLog
         /// entries' do). Called when the first log starts: every mod has started and the game has loaded, so Harmony's registry holds the
         /// patches other mods make at start-up and while a game loads, and nothing ticks yet (no tick or parallel tick is running a patch
         /// method; only a thread another mod runs of its own could be). A patch another mod makes later is not seen. Only this mod's own
-        /// patches are added; nothing of any other patch is removed, reordered or changed.
+        /// patches are added; nothing of any other patch is removed, reordered or changed. All of it runs inside
+        /// <see cref="AroundAutoPatching"/>, which leaves the game's random state as it found it (see there: this is what keeps co-op in step).
         /// </summary>
         internal static void AutoInstall()
         {
@@ -170,7 +171,7 @@ namespace PerformanceLog
             autoTried = true;
             try
             {
-                AutoInstall(AutoCandidates(), Patch);
+                AutoInstall(AutoCandidates, Patch);
                 Log.Info("Auto watch: " + AutoWatch.Describe(autoResults) + ".");
             }
             catch (Exception e)
@@ -180,17 +181,46 @@ namespace PerformanceLog
             }
         }
 
-        /// <summary>Plans the auto watch over these patches and watches what it chooses, patching each with <paramref name="patch"/> (null, or why not).</summary>
-        internal static void AutoInstall(List<AutoWatchCandidate> candidates, Func<MethodBase, string> patch)
+        /// <summary>
+        /// Plans the auto watch over these patches and watches what it chooses, patching each with <paramref name="patch"/> (null, or why
+        /// not). The patches are read and made inside <see cref="AroundAutoPatching"/>.
+        /// </summary>
+        internal static void AutoInstall(Func<List<AutoWatchCandidate>> candidates, Func<MethodBase, string> patch)
         {
-            var named = new HashSet<string>(watched.Select(w => w.Name), StringComparer.Ordinal);
-            autoResults = AutoWatch.Plan(candidates, Instrumentation.HarmonyId, named, Config.MaxWatched - watched.Count, c =>
+            AroundAutoPatching(() =>
             {
-                if (!(c.Method is MethodBase method)) return "the patch method could not be found";
-                string failure = patch(method);
-                if (failure == null) watched.Add(new Watched { Method = method, Name = c.Label, Assembly = c.Assembly, Auto = true });
-                return failure;
+                var named = new HashSet<string>(watched.Select(w => w.Name), StringComparer.Ordinal);
+                autoResults = AutoWatch.Plan(candidates(), Instrumentation.HarmonyId, named, Config.MaxWatched - watched.Count, c =>
+                {
+                    if (!(c.Method is MethodBase method)) return "the patch method could not be found";
+                    string failure = patch(method);
+                    if (failure == null) watched.Add(new Watched { Method = method, Name = c.Label, Assembly = c.Assembly, Auto = true });
+                    return failure;
+                });
             });
+        }
+
+        /// <summary>
+        /// Runs the auto watch's patching. In the game it is <see cref="KeepUnityRandom"/>; a test replaces it for a while (and puts it
+        /// back), because Unity's random state cannot be read outside the game.
+        /// </summary>
+        internal static Action<Action> AroundAutoPatching = KeepUnityRandom;
+
+        /// <summary>
+        /// Runs <paramref name="patching"/> and then puts <c>UnityEngine.Random</c>'s state back exactly as it was, even if it throws.
+        /// Every <c>Harmony.Patch</c> builds a MonoMod <c>DynamicMethodDefinition</c>, whose field initializer calls <c>Guid.NewGuid()</c>,
+        /// and BeaverBuddies (its <c>GuidPatcher</c>) turns every <c>Guid.NewGuid()</c> into 16 draws from <c>UnityEngine.Random</c>, the
+        /// state Timberborn's <c>RandomNumberGenerator</c> uses for the simulation. When the first log starts, BeaverBuddies has already
+        /// seeded that state for the game (in <c>DeterminismService</c>'s constructor), so without this a player with AutoWatch = true, or
+        /// with a different number of patches made, would enter the first tick with a different random state from the other players: a
+        /// co-op desync. The Watch entries' patches are made at <c>StartMod</c>, before any game seeds it, so they need no such care. If the
+        /// state cannot be read, nothing is patched.
+        /// </summary>
+        static void KeepUnityRandom(Action patching)
+        {
+            UnityEngine.Random.State state = UnityEngine.Random.state;
+            try { patching(); }
+            finally { UnityEngine.Random.state = state; }
         }
 
         /// <summary>Every prefix, postfix and finalizer in Harmony's registry on a method that runs behind a profile row or is on the hot list.</summary>
@@ -235,6 +265,7 @@ namespace PerformanceLog
                 c.Assembly = type.Assembly.GetName().Name;
                 c.Method = patchMethod;
                 c.Refused = Refusal(patchMethod);
+                c.CanReplace = kind == "prefix" && patchMethod.ReturnType == typeof(bool);
                 // Harmony hands its patches the method they are on as MethodBase.GetMethodFromHandle gives it, so that is the key the watch
                 // looks up; the MethodInfo in Harmony's registry is the same method, but may be a different object.
                 if (c.Refused == null && !type.IsGenericType) c.Method = MethodBase.GetMethodFromHandle(patchMethod.MethodHandle) ?? patchMethod;
@@ -297,7 +328,7 @@ namespace PerformanceLog
             if (autoResults == null && auto == 0) return autoFailure != null ? "could not run: " + autoFailure : "off";
             string text = (auto - never.Count) + " of " + auto + " watched patch methods were called";
             if (never.Count > 0)
-                text += "|never seen called (not called, or so small that the runtime copied it into the method it patches, where no watch sees it): " + string.Join("; ", never.Take(12)) +
+                text += "|never seen called (not called, called only off the game thread, or so small that the runtime copied it into the method it patches, where no watch sees it): " + string.Join("; ", never.Take(12)) +
                         (never.Count > 12 ? "; and " + (never.Count - 12) + " more" : "");
             return text;
         }
@@ -309,5 +340,9 @@ namespace PerformanceLog
             ids = new Dictionary<MethodBase, int>();
             autoTried = false; autoFailure = null; autoResults = null;
         }
+
+        /// <summary>Test-only: a method watched the way a Watch entry's is after <see cref="Install"/> has patched it.</summary>
+        internal static void AddEntryForTest(MethodBase method, string name, string assembly) =>
+            watched.Add(new Watched { Method = method, Name = name, Assembly = assembly });
     }
 }

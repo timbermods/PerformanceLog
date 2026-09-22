@@ -277,7 +277,7 @@ namespace PerformanceLog
                 double all = s.Totals.Where(where).Sum(x => x.Ms);
                 t.Append("**").Append(title).Append("** (together ").Append(F(all / seconds)).Append(" ms/s)\n\n| Name | Mod | ms/s | Share | calls/s | us per call | KB/s | slowest call ms |\n|---|---|---|---|---|---|---|---|\n");
                 foreach (Profile.Total x in rows)
-                    t.Append("| `").Append(Short(x.Name)).Append("` | ").Append(x.Mod).Append(" | ").Append(F(x.Ms / seconds, 2)).Append(" | ").Append(Pct(x.Ms, all)).Append(" | ")
+                    t.Append("| `").Append(x.Kind == ProfileKind.Method ? ShortMethod(x.Name) : Short(x.Name)).Append("` | ").Append(x.Mod).Append(" | ").Append(F(x.Ms / seconds, 2)).Append(" | ").Append(Pct(x.Ms, all)).Append(" | ")
                         .Append(F(x.Calls / seconds, 0)).Append(" | ").Append(x.Calls > 0 ? F(x.Ms * 1000 / x.Calls, 1) : "").Append(" | ").Append(F(x.Kb / seconds, 1)).Append(" | ").Append(F(x.MaxMs, 2)).Append(" |\n");
                 t.Append('\n');
             }
@@ -379,6 +379,27 @@ namespace PerformanceLog
             int dot = name.LastIndexOf('.');
             string tail = dot >= 0 ? name.Substring(dot + 1) : name;
             return tail.Length > 60 ? tail.Substring(0, 60) : tail;
+        }
+
+        /// <summary>
+        /// A watched method's name (Namespace.Type.Method(Parameters)) cut, when it is long, to Type.Method(Parameters), keeping the class:
+        /// an auto-watched patch method is nearly always called Prefix or Postfix, so the method's own name alone says nothing. The
+        /// parameters become "(...)" only if the name is still too long. The same rule as short_method in tools/perflog.py.
+        /// </summary>
+        public static string ShortMethod(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "?";
+            if (name.Length <= 48) return name;
+            int paren = name.IndexOf('(');
+            string head = paren >= 0 ? name.Substring(0, paren) : name, parameters = paren >= 0 ? name.Substring(paren) : "";
+            string[] parts = head.Split('.');
+            string cls = parts.Length >= 2 ? parts[parts.Length - 2] : "";
+            int plus = cls.LastIndexOf('+');
+            if (plus >= 0) cls = cls.Substring(plus + 1);
+            string method = (cls.Length > 0 ? cls + "." : "") + parts[parts.Length - 1];
+            string shorter = method + parameters;
+            if (shorter.Length > 60 && paren >= 0) shorter = method + "(...)";
+            return shorter.Length > 60 ? shorter.Substring(0, 60) : shorter;
         }
 
         /// <summary>

@@ -96,7 +96,7 @@ To read the game's own code (the way every patch target here was checked): `ilsp
   (`ProfileTests.NoAliasing`).
 - **`Columns` is initialised in textual order** (C# static field initialisers). Declare arrays before the groups that use them.
 - **Only some settings can live in the in-game Mod Settings menu** (`Settings.cs`, `PerformanceSettings`). `Plugin.StartMod` reads `PerformanceLog.cfg`
-  and decides `Enabled`/`Profile`/`Watch` (which Harmony patches get made, including whether the entity tick is patched at all) before Bindito, and so
+  and decides `Enabled`/`Profile`/`Watch`/`AutoWatch` (which Harmony patches get made, including whether the entity tick is patched at all) before Bindito, and so
   Mod Settings, exists; making those live would mean re-patching the game while it runs or always paying for the entity-tick patch even when `Profile = off`
   asks not to. Only the six numbers `Session.Start` reads fresh each session (`SlowFrameMs`, `SummarySeconds`, `ProfileSeconds`, `OverheadBudgetPercent`,
   `SpikeContributors`, `MaxSlowRowsPerMinute`) are in the menu; `SessionService.PostLoad` calls `PerformanceSettings.ApplyTo` to fold them onto `Plugin.Config`
@@ -107,6 +107,11 @@ To read the game's own code (the way every patch target here was checked): `ilsp
   nothing ticks yet. It only adds this mod's own prefix and postfix (id `kyler.performancelog.watch`) around another mod's patch method; it never unpatches,
   reorders or changes anyone else's patch. Which methods it takes is decided in `AutoWatch.Plan` (pure, tested in `AutoWatchTests`): name order, not time,
   because ranking by what the recording measured would mean patching while the game runs.
+- **Under BeaverBuddies, making a Harmony patch draws from the game's random numbers.** Every `Harmony.Patch` builds a MonoMod `DynamicMethodDefinition`,
+  which calls `Guid.NewGuid()`, and BeaverBuddies' `GuidPatcher` turns each `Guid.NewGuid()` into 16 draws from `UnityEngine.Random`, the state the
+  simulation's `RandomNumberGenerator` uses and that BeaverBuddies seeds when a game loads. Patching at `StartMod` is harmless (the seed comes later);
+  any patch made after a game has started loading must run inside `Watch.KeepUnityRandom` (which puts `UnityEngine.Random.state` back as it was), or
+  one player's random numbers move and co-op desyncs. Never patch mid-game, not even with that guard (it is only proven at load, before the first tick).
 - Colony and memory columns are read only when a row is written and carried over otherwise (`lastHeavy` in `Probe`).
 - The tests run each check on a thread-pool thread, and `Probe` is static and remembers the game thread's id: every check that uses it goes through `Rig` in `CoreTests.cs`.
 
