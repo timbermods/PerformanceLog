@@ -24,7 +24,7 @@ namespace PerformanceLog.Tests
             Probe.Stop();
             Probe.TestClock = () => Now;
             Alloc.UseTestSource(() => Bytes);
-            Probe.ScopePairTicks = 0; Probe.SamplePairTicks = 0; Probe.ExactCallTicks = 0; Probe.AllocPairTicks = 0; Probe.PatchCallTicks = 0;
+            Probe.ScopePairTicks = 0; Probe.SamplePairTicks = 0; Probe.ExactCallTicks = 0; Probe.AllocPairTicks = 0; Probe.PatchCallTicks = 0; Probe.PatchBodyTicks = 0;
             Probe.HeavySampler = null;
             Probe.Start(new ProbeSettings
             {
@@ -92,6 +92,7 @@ namespace PerformanceLog.Tests
             yield return ("Probe: a copy of the session counts does not change when the original does", StatsCloneIsIndependent);
             yield return ("Probe: measuring cost is estimated for each frame", OverheadEstimate);
             yield return ("Probe: calibration measures something and leaves the probe clean", CalibrationWorks);
+            yield return ("Probe: a patch body is timed with the log on and no call sampled, and the probe is left off and clean", UnsampledBodyTiming);
             yield return ("Alloc: a counter is chosen, and a test source is followed", AllocSources);
             yield return ("Milestones: marks are kept in order and safe for the header", MilestoneLines);
             yield return ("PatchBuilder: hot, shared and other patches are listed, the mod's own are only counted", PatchReport);
@@ -633,6 +634,39 @@ namespace PerformanceLog.Tests
             Check(Probe.SamplePairTicks >= Probe.ClockReadTicks, "a sampled pair costs at least a clock read");
             Equal(0, Profile.Count, "calibration leaves no keys behind");
             Check(!Probe.Enabled, "and does not switch the probe on");
+        }
+
+        static void UnsampledBodyTiming()
+        {
+            Probe.Stop();
+            Alloc.Init();
+            Profile.Configure(1, 1, 1);
+            bool wasOn = true;
+            int sampled = 0, calls = 0;
+            double ticks = Probe.MeasureUnsampled(n =>
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    wasOn &= Probe.Enabled;
+                    Probe.Count(Counter.PatchCalls);
+                    if (Profile.BeginEntity().On) sampled++;
+                    if (Profile.BeginComponent().On) sampled++;
+                    calls++;
+                }
+            }, 1000, 3);
+            Check(ticks > 0, "the calls took some time");
+            Check(calls > 3000, "a warm-up and three rounds ran: " + calls);
+            Check(wasOn, "the probe was on while they ran, so the bodies took the path they take in a log");
+            Equal(0, sampled, "no call was one of the sampled ones, although the intervals were 1");
+            Check(!Probe.Enabled, "the probe is off afterwards");
+            Equal(0, Profile.Count, "no keys are left behind");
+            Equal(16, Profile.EntityInterval, "the sampling is back to where a log starts it");
+            Check(Probe.MeasureUnsampled(n => throw new InvalidOperationException("broken")) == 0 && !Probe.Enabled, "a body that throws measures 0 and leaves the probe off");
+            using (new Rig())
+            {
+                Equal(0.0, Probe.MeasureUnsampled(n => calls++), "nothing is measured while a log runs");
+                Check(Probe.Enabled, "and the log is left running");
+            }
         }
 
         // ---- allocation counter, milestones ----

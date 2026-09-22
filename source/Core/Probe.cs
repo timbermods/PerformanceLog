@@ -92,7 +92,7 @@ namespace PerformanceLog
         /// <summary>Fills the heavy extras. Called only when a row is about to be written.</summary>
         public static Action<double[]> HeavySampler;
 
-        // What measuring costs, in Stopwatch ticks. Set by Calibrate (and PatchCallTicks by the game side).
+        // What measuring costs, in Stopwatch ticks. Set by Calibrate (and the two patch costs by the game side, with MeasureUnsampled).
         public static double ClockReadTicks { get; set; }
         public static double AllocReadTicks { get; set; }
         /// <summary>One timed scope: Begin and End.</summary>
@@ -103,8 +103,12 @@ namespace PerformanceLog
         public static double AllocPairTicks { get; set; }
         /// <summary>One call of a singleton that is always timed, without the allocation readings.</summary>
         public static double ExactCallTicks { get; set; }
-        /// <summary>Running one of this mod's Harmony patches that does nothing.</summary>
+        /// <summary>The bodies of this mod's per-call patch (the entity tick's prefix and postfix) on a call that is not sampled, which is almost every call.</summary>
+        public static double PatchBodyTicks { get; set; }
+        /// <summary>One call of this mod's per-call patches: <see cref="PatchBodyTicks"/> plus what Harmony adds to call a prefix and a postfix. 0 if not measured.</summary>
         public static double PatchCallTicks { get; set; }
+        /// <summary>What each patch call is charged in overheadUs: <see cref="PatchCallTicks"/>, or 40 ns when it could not be measured (the calibration line says so).</summary>
+        public static double PatchCallTicksCharged => PatchCallTicks > 0 ? PatchCallTicks : 40e-9 * Stopwatch.Frequency;
 
         public static bool OnGameThread => Environment.CurrentManagedThreadId == mainThreadId;
 
@@ -208,6 +212,45 @@ namespace PerformanceLog
                 Array.Clear(frameAlloc, 0, frameAlloc.Length);
             }
             catch (Exception e) { LastFailure = e.Message; }
+        }
+
+        /// <summary>
+        /// Stopwatch ticks for one of the calls <paramref name="calls"/> makes when asked for n, timed the way a patch body runs on almost every
+        /// call while a log is on: the probe switched on, and entity and component sampling held off so that no call is one of the sampled ones
+        /// (those are charged separately). The fastest of a few rounds after a warm-up, so compiling and the scheduler do not decide the figure.
+        /// Only while no log is running (0 otherwise, or if it fails); the probe is off and the profile empty afterwards, as a log start expects.
+        /// </summary>
+        public static double MeasureUnsampled(Action<int> calls, int repeats = 4000, int rounds = 5)
+        {
+            if (Enabled || calls == null) return 0;
+            int savedThread = mainThreadId;
+            Func<long> savedClock = TestClock;
+            double best = 0;
+            try
+            {
+                mainThreadId = Environment.CurrentManagedThreadId;
+                TestClock = null;
+                Enabled = true;
+                Profile.HoldSampling();
+                calls(repeats / 10 + 1);
+                best = double.MaxValue;
+                for (int round = 0; round < rounds; round++)
+                {
+                    long t0 = Stopwatch.GetTimestamp();
+                    calls(repeats);
+                    best = Math.Min(best, (Stopwatch.GetTimestamp() - t0) / (double)repeats);
+                }
+            }
+            catch (Exception e) { LastFailure = e.Message; best = 0; }
+            finally
+            {
+                Enabled = false;
+                TestClock = savedClock;
+                mainThreadId = savedThread;
+                Array.Clear(counters, 0, counters.Length);
+                Profile.Reset();
+            }
+            return best;
         }
 
         public static void Start(ProbeSettings settings)
@@ -504,7 +547,7 @@ namespace PerformanceLog
             r[Columns.HeapMB] = memory / 1048576.0;
             r[Columns.AllocKB] = allocKb;
             r[Columns.Dropped] = frameRing != null ? frameRing.Dropped : 0;
-            double patchTicks = counters[(int)Counter.PatchCalls] * (PatchCallTicks > 0 ? PatchCallTicks : 0.00000004 * Stopwatch.Frequency);
+            double patchTicks = counters[(int)Counter.PatchCalls] * PatchCallTicksCharged;
             r[Columns.OverheadUs] = (frameScopes * ScopePairTicks + profileCost + patchTicks) * msPerTick * 1000;
 
             for (int i = 0; i < Columns.CounterCount; i++) r[Columns.CounterBase + i] = counters[i];

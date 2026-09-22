@@ -529,6 +529,18 @@ class FindingTests(unittest.TestCase):
             s.window()
         self.assertNotIn("KNOWN ISSUE", self.report(s), "an unreadable version is not guessed at")
 
+    def test_a_recording_whose_patch_cost_read_0_is_told_overhead_is_understated(self):
+        old = ["calibration", "clockReadNs", "23", "allocReadNs", "12", "scopePairNs", "109", "samplePairNs", "51", "patchCallNs", "0"]
+        new = ["calibration", "clockReadNs", "23", "allocReadNs", "12", "scopePairNs", "109", "samplePairNs", "51", "patchBodyNs", "6.2", "patchCallNs", "6.9"]
+        for version, calibration, expect in (("0.1.3", old, True), ("0.1.3", new, False), ("0.1.3", None, False), ("0.1.4", old, False)):
+            s = Synthetic(header={"mod": version})
+            if calibration:
+                s.pipes.append(calibration)
+            for _ in range(6):
+                s.window()
+            text = self.report(s)
+            self.assertEqual(expect, "overheadUs understates what the mod itself cost" in text, (version, calibration))
+
     def test_the_loadall_counter_bug_of_0_1_0_is_not_reported_as_a_finding(self):
         for version, expect in (("0.1.0", False), ("0.1.1", True)):
             s = Synthetic(header={"mod": version})

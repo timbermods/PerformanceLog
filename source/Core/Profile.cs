@@ -195,6 +195,15 @@ namespace PerformanceLog
             entityCountdown = Gap(EntityInterval); componentCountdown = Gap(ComponentInterval); allocCountdown = Gap(AllocEvery);
         }
 
+        /// <summary>
+        /// Holds entity and component sampling off, so no call is one of the sampled ones, until the next <see cref="Reset"/> or
+        /// <see cref="Configure"/>. For timing what the patch bodies cost on the calls that are not sampled (<see cref="Probe.MeasureUnsampled"/>).
+        /// </summary>
+        internal static void HoldSampling()
+        {
+            entityCountdown = int.MaxValue; componentCountdown = int.MaxValue;
+        }
+
         // ---- keys ----
 
         /// <summary>The id of a class's key, registering it on first use. Game thread only.</summary>

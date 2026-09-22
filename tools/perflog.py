@@ -47,6 +47,13 @@ KIND_TITLES = collections.OrderedDict([
 SLOW_MEAN_MS = 20.0
 LOAD_KINDS = ("load", "load-non-singleton", "post-load", "post-load-non-singleton")
 
+# Printed only for a recording whose calibration line has no patchBodyNs (KNOWN_ISSUE_APPLIES): a build of the fix that still carries an older
+# version number measures the patch bodies already.
+PATCH_COST_NOTE = ("overheadUs understates what the mod itself cost: every call of its per-call patches (entity ticks, components, watched "
+                   "methods; the patchCalls column) was charged patchCallNs from the `# calibration|` line, which timed an empty patch and "
+                   "read 0, so those calls (about 100,000 a second at speed 7 with Profile = deep) count for nothing in overheadUs and in the "
+                   "'measuring cost more than 2% of a frame' warning. The real bodies take a few nanoseconds a call.")
+
 # What is wrong with recordings made by an older Performance Log, found when a recording was first read. Each entry is (fixed in, note): the note
 # is printed at the top of the report for a recording made by an earlier version, so nobody trusts a figure that was known to be off.
 KNOWN_ISSUES = [
@@ -59,7 +66,18 @@ KNOWN_ISSUES = [
     ("0.1.1", "prDraw and prBatches are 0: Unity 6 has no counter by those names (its draw calls are split into several). The other columns are unaffected."),
     ("0.1.1", "While the game ran, frames.csv, profile.csv, spikes.csv and events.csv were held open by the mod, so copying or zipping the folder could leave them out "
               "(the folder listing shows size 0). Exit the game first, or read them with shared access."),
+    ("0.1.4", PATCH_COST_NOTE),
 ]
+
+
+def _patch_cost_was_not_measured(session):
+    calibration = session.pipe("calibration")
+    return bool(calibration) and not any("patchBodyNs" in parts for parts in calibration)
+
+
+# Notes that only some recordings of the versions they name have, each with the check that finds the problem in a recording (a note not listed
+# here is printed for every recording made before its fix).
+KNOWN_ISSUE_APPLIES = {PATCH_COST_NOTE: _patch_cost_was_not_measured}
 
 GAME_ASSEMBLY_PREFIXES = ("Timberborn.", "Bindito.", "UnityEngine", "Unity.", "System")
 
@@ -79,7 +97,7 @@ def known_issues(session):
     have = version_tuple(session.h("mod"))
     if have is None:
         return []
-    return [note for fixed, note in KNOWN_ISSUES if have < version_tuple(fixed)]
+    return [note for fixed, note in KNOWN_ISSUES if have < version_tuple(fixed) and KNOWN_ISSUE_APPLIES.get(note, lambda _: True)(session)]
 
 
 # ---------------------------------------------------------------- reading

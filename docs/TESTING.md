@@ -6,13 +6,14 @@ the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (94 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (45 checks).
+`dotnet run --project tests -c Release` (96 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (46 checks).
 
 | What | How |
 |---|---|
 | Frame accounting: slots are exclusive and add up to the frame; unbalanced scopes; other threads ignored; allocation attribution; flags; ticks and buckets; Unity phases; summaries and histograms | Real `Probe` against a scripted clock (`CoreTests`) |
 | The per-frame path allocates nothing | `GC.GetAllocatedBytesForCurrentThread` around 2000 frames; also for a wrapper with the log off |
 | Failure containment: a failing clock switches the probe off, a full ring drops rows and counts them | `CoreTests` |
+| The cost charged for each patch call (`patchCallNs`) is at least what the entity patch's own bodies take on a call that is not sampled, timed with the log on and sampling held off (the part Harmony adds needs the game) | `CoreTests.UnsampledBodyTiming`, `GameBindingTests.PatchCostCoversTheBodies` |
 | The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution | `ProfileTests` |
 | Watched methods: each is sampled at its own rate, widening with its own load inside the budget and coming back down after, with a row (and at least one timing) for every window it ran in; calls nobody timed get a `sampled` 0 row and stay out of the totals | `WatchSamplingTests`, `test_perflog` |
 | The files: header, columns, invariant number format in any language, text tails, events, a file rewritten whole, an unopenable path, dropped rows, flush on stop | `WriterTests` |
@@ -65,7 +66,8 @@ heap and is coarse**. The per-singleton `KB/s` figures are therefore only good i
 1. **The 0.1.1 fixes themselves**: that each service is wrapped once (`# capability-final|patchCalls|singleton wrappers put in place` should be a handful, not hundreds of thousands), that the four files
    can be zipped while the game runs, that `workingMB` is non-zero, that game singletons show `game`, that loading steps show a heap growth, and that `prDraw` is non-zero.
 2. **Overhead** measured against a game running without the mod. The mod's own estimate (0.1.0: 0.3% of a frame paused, 0.8% at speed 7) left out the wrapper swapping and used a default cost for a
-   patch; 0.1.1 measures the patch cost, but nobody has compared the frame rate with the mod off. See the checklist.
+   patch. 0.1.1 to 0.1.3 measured the patch cost on an empty patch, which read 0 in every recording (`patchCallNs|0`), so their `overheadUs` leaves the per-call patches out; the cost is now
+   the real bodies (`patchBodyNs`) plus what Harmony adds (`patchCallNs`), but that has not run in a game yet, and nobody has compared the frame rate with the mod off. See the checklist.
 3. **Co-op**: with BeaverBuddies actually connected to another player. It has only been seen running with BeaverBuddies loaded in a single-player game.
 4. **`Ticker.FinishFullTick`** (one of the four save-stage patches) is counted inside `save stages`, so it has not been seen separately; the stages of three saves were recorded.
 5. **The mod attribution** (which DLL belongs to which mod) worked for the mods in the first recording (`beaverbuddies`, `Kyler.OptimizedLocalHousing`, `eMka.ModSettings`, `kyler.persistentworkareas`);
@@ -100,6 +102,7 @@ heap and is coarse**. The per-singleton `KB/s` figures are therefore only good i
    `# capability-final|patchCalls|...` lines at the end say non-zero counts, and none says `never ran`, including `MeteredTickableComponent.Tick (sampled calls)`.
    `singleton wrappers put in place` should be a handful (one or two per array). `# capability|workingSet|...` should say `from Windows`.
    `# capability-final|profilerRecorder|...` and `frameTiming` may legitimately say `never produced a value` in a release build.
+   `# calibration|...` has `patchBodyNs` and `patchCallNs` of a few nanoseconds each (not `0` and not `unmeasured`), `patchCallNs` at least `patchBodyNs`.
 7. `profile.csv` has rows of kind `component`, not just `entity`.
 8. Compare the frame rate the game shows with `summary.md`'s mean; they should agree.
 9. Run `python tools/perflog.py report <folder>` and confirm it reads the folder without complaint.
