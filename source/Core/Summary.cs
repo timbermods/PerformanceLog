@@ -181,8 +181,9 @@ namespace PerformanceLog
         /// in it (the tick loop with its parts, and the singleton updates), the LateUpdate phase less <c>lateMs</c>, <c>plPost</c>, the phases before
         /// Update, and what falls between the phases. The game saves in its LateUpdate and a mod that defers the save to the end of a tick
         /// (BeaverBuddies) in Update; the row does not say which, so <c>saveMs</c> is taken out of the phase with more room left. That is the phase it
-        /// ran in, except for a save shorter than the gap between the two phases' own remainders, and then the error is less than the save.
-        /// tools/perflog.py (split_other) splits the same way.
+        /// ran in, except for a save shorter than the gap between the two phases' own remainders: then one phase reads high and the other low by up
+        /// to the save. A row that holds both kinds of save is split approximately. tools/perflog.py (split_other) splits the same way, but per
+        /// summary window, where this splits the session's mean row, so the two can differ in a session that has both kinds.
         /// </summary>
         static double[] OtherByPhase(double[] r)
         {

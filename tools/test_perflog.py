@@ -494,6 +494,29 @@ class FindingTests(unittest.TestCase):
         self.assertNotIn("Most of the frame is not the game's or any mod's code", text)
         self.assertNotIn("Likely the graphics card", text)
 
+    def test_a_wait_before_the_update_phase_still_points_at_the_graphics_card(self):
+        # Unity can wait for the last frame to be presented in its first phase (plTime), not plPost. Here that wait holds 14 of 25 ms and the
+        # game thread is busy for 40% of the frame, while the Update phase's untimed 2 ms is still more than plPost's 1 ms.
+        s = Synthetic()
+        for _ in range(8):
+            s.window(frame_ms=25.0, updMs=3.0, entMs=3.0, plTime=14.0, plUpdate=8.0, plLate=1.5, plPost=1.0, mainCpuMs=10.0, procCpuMs=12.0)
+        text = self.report(s)
+        self.assertIn("[!] Most of the frame is not the game's or any mod's code", text, "the high-severity graphics card finding stays")
+        self.assertIn("before Update", text, "the evidence says where the time is")
+        self.assertNotIn("other work in Unity's Update phase, outside", text)
+        self.assertNotIn("The graphics card is not what holds the frame", text)
+
+    def test_update_phase_time_with_an_idle_game_thread_is_not_called_work(self):
+        # Most of the frame is in the Update phase, outside the timed parts, but the game thread is busy for only 30% of it: something there
+        # waits. The finding still points at the Update phase, and does not rule the graphics card out.
+        s = Synthetic()
+        for _ in range(8):
+            s.window(frame_ms=40.0, updMs=1.0, entMs=1.0, plUpdate=31.0, plLate=1.0, plPost=4.0, mainCpuMs=12.0, procCpuMs=14.0)
+        text = self.report(s)
+        self.assertIn("Most of the frame is other work in Unity's Update phase", text)
+        self.assertNotIn("The graphics card is not what holds the frame", text)
+        self.assertIn("busy for only 30%", text)
+
     def test_vsync_capped_is_healthy(self):
         s = Synthetic(header={"display": "vSyncCount=1 targetFrameRate=-1 resolution=1920x1080 refreshHz=60.00 fullScreen=Windowed"})
         for _ in range(8):

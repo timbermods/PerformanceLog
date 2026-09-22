@@ -335,7 +335,9 @@ def split_other(r):
     """otherMs of one row (times per frame) by Unity phase: each phase less the timed parts that run in it, plPost, the phases before Update,
     and what falls between the phases. The game saves in its LateUpdate and a mod that defers the save to the end of a tick (BeaverBuddies)
     in Update; the row does not say which, so saveMs is taken out of the phase with more room left. That is the phase it ran in, except for a
-    save shorter than the gap between the two phases' own remainders, and then the error is less than the save."""
+    save shorter than the gap between the two phases' own remainders: then one phase reads high and the other low by up to the save. A summary
+    row that holds both kinds of save is split approximately, and the mod's summary.md (Summary.OtherByPhase) splits the session's mean row,
+    this report each window, so the two can differ by as much in a session that has both."""
     update = r.get("plUpdate", 0.0) - sum(r[s] for s in UPDATE_PHASE_SLOTS)
     late = r.get("plLate", 0.0) - r["lateMs"]
     if r["saveMs"] > 0:
@@ -679,23 +681,34 @@ def findings_for(session, args):
                                "That wait is free: the computer had time to spare. Look for slowness in the slow frames and in the simulation instead."))
         elif other >= 0.5 and mean >= SLOW_MEAN_MS:
             evidence = "%.0f%% of an average frame is outside every part this mod times" % (100 * other)
-            # Which phase holds it decides where to look: plPost is drawing and waiting, the other two are code that runs every frame.
+            # Which part holds it decides where to look. The Update and LateUpdate remainders are code that runs every frame; plPost is drawing and
+            # waiting, and Unity can also wait for the last frame to be presented in its first phase (plTime), so the phases before Update and
+            # what falls between phases point at the graphics card or vertical sync as plPost does.
             split = other_by_phase(S) if phases_measured(session, S) else None
-            biggest = max(("update", "late", "post"), key=lambda k: split[k]) if split else "post"
-            if biggest != "post":
+            biggest = max(("update", "late", "post", "phases", "between"), key=lambda k: split[k]) if split else "post"
+            if biggest in ("update", "late"):
                 evidence += ("; per frame, %.1f ms of it is in Unity's Update phase outside the timed parts, %.1f ms in the LateUpdate phase outside lateMs "
                              "and %.1f ms in plPost (drawing and the wait for vertical sync)" % (split["update"], split["late"], split["post"]))
+                # A game thread that is mostly idle is waiting inside that phase (on another thread, the disk or the graphics card), not working.
+                idle = busy is not None and busy < 0.7
+                if idle:
+                    evidence += "; the game thread was busy for only %.0f%% of the frame" % (100 * busy)
                 if biggest == "update":
                     title = "Most of the frame is other work in Unity's Update phase, outside every part this mod times"
                     check = ("That is code that runs every frame beside the game's tick loop and singletons: the game's own and other mods' scripts "
-                             "(MonoBehaviour Update, coroutines). The graphics card is not what holds the frame. Compare a recording without a suspected "
-                             "mod, or time a suspect method with a Watch entry.")
+                             "(MonoBehaviour Update, coroutines). " +
+                             ("The game thread is idle for much of it, so a script there is waiting: on another thread, the disk or the graphics card. " if idle
+                              else "The graphics card is not what holds the frame. ") +
+                             "Compare a recording without a suspected mod, or time a suspect method with a Watch entry.")
                 else:
                     title = "Most of the frame is other work in Unity's LateUpdate phase, outside every part this mod times"
                     check = ("Unity's animation and user interface (UI Toolkit) run in this phase beside scripts' LateUpdate, and grow with what is on screen. "
                              "Compare a recording with fewer animated characters in view or no panel open, and one without a suspected mod.")
                 out.append(Finding("high" if split[biggest] / mean >= 0.4 else "info", title, evidence + ".", check, key="other-" + biggest))
             else:
+                if split and biggest == "phases":
+                    evidence += ("; %.0f%% of it is in Unity's phases before Update (plTime to plPre), where Unity also waits for the last frame to be presented"
+                                 % (100 * split["phases"] / mean))
                 if plpost >= 0.4:
                     evidence += "; %.0f%% of it is Unity's post-late-update phase (drawing, presenting, the wait for vertical sync)" % (100 * plpost)
                 if busy is not None:
