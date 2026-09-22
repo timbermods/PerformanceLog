@@ -262,8 +262,14 @@ namespace PerformanceLog
             double seconds = Math.Max(1, s.Seconds);
             SessionStats st = s.Stats;
             t.Append("## Garbage collection and memory\n\n");
+            // A frame whose allocation was lost to a collection (heap-size counter) is left out of the rate: its allocation is not in the total.
+            double measuredSeconds = Math.Max(1, s.Seconds - st.AllocUnmeasuredMs / 1000);
             t.Append("- ").Append(F(gc, 0)).Append(" garbage collections (").Append(F(gc / (seconds / 60), 1)).Append(" per minute). The game allocated about ")
-                .Append(F(r[Columns.AllocKB] / seconds, 0)).Append(" KB per second (").Append(F(r[Columns.AllocKB] / Math.Max(1, r[Columns.Ticks]), 0)).Append(" KB per tick).\n");
+                .Append(F(r[Columns.AllocKB] / measuredSeconds, 0)).Append(" KB per second (").Append(F(r[Columns.AllocKB] / Math.Max(1, r[Columns.Ticks]), 0)).Append(" KB per tick).\n");
+            if (st.AllocUnmeasuredFrames > 0)
+                t.Append("- Allocation was **not measured in ").Append(st.AllocUnmeasuredFrames).Append(st.AllocUnmeasuredFrames == 1 ? " frame" : " frames")
+                    .Append("** (").Append(F(st.AllocUnmeasuredMs / 1000, 1)).Append(" s): the allocation counter fell during them, as the heap size does at a garbage collection, so what ")
+                    .Append("those frames allocated is lost and their KB columns read low. They are left out of the per-second figure above; in `frames.csv` they are the rows with `gcDelta` above 0 or a negative `allocKB`.\n");
             t.Append("- Managed heap ranged ").Append(F(st.HeapMinMB, 0)).Append(" to ").Append(F(st.HeapMaxMB, 0)).Append(" MB; at the last sample Unity's managed heap was ")
                 .Append(F(r[Columns.HeavyBase], 0)).Append(" MB reserved, ").Append(F(r[Columns.HeavyBase + 1], 0)).Append(" MB in use, ").Append(F(r[Columns.HeavyBase + 2], 0))
                 .Append(" MB in all with native memory, and the process held ").Append(F(r[Columns.HeavyBase + 3], 0)).Append(" MB in RAM.\n");

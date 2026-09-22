@@ -62,6 +62,7 @@ namespace PerformanceLog.Tests
             tests.AddRange(ProfileTests.All());
             tests.AddRange(WriterTests.All());
             tests.AddRange(SummaryTests.All());
+            tests.AddRange(HeapModeTests.All());
             tests.AddRange(GameBindingTests.All(managed));
 
             int failures = 0;

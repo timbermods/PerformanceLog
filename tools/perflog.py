@@ -12,6 +12,7 @@ The report states what the numbers say and what they are consistent with. It end
 evidence it rests on and what to check next, and the tool never claims more than the data supports.
 """
 import argparse
+import bisect
 import collections
 import csv
 import json
@@ -265,6 +266,64 @@ def total(rows, column):
 
 def seconds_of(rows):
     return sum(r["frameMs"] * r["frames"] for r in rows) / 1000.0
+
+
+def heap_alloc(session):
+    """True when allocation was read from the size of the managed heap (the allocSource capability), which falls at a garbage collection."""
+    return any(len(p) >= 2 and p[1].startswith("GC.GetTotalMemory") for p in session.pipe("capability", "allocSource"))
+
+
+def alloc_unmeasured(session, rows):
+    """The slow frames inside the summary rows `rows` whose allocation was not measured, and their milliseconds. With the heap size as the
+    counter a frame with a collection loses what it allocated; its row has gcDelta > 0 or (the heap shrank) a negative allocKB. That holds for
+    recordings of every version. Frames too short to have a row of their own are not known here; they are short."""
+    if not heap_alloc(session) or not rows:
+        return 0, 0.0
+    ordered = sorted(rows, key=lambda r: r["frame"])
+    ends = [r["frame"] for r in ordered]
+    count, ms = 0, 0.0
+    for f in session.slow:
+        if f["gcDelta"] <= 0 and f["allocKB"] >= 0:
+            continue
+        i = bisect.bisect_left(ends, f["frame"])   # the first window that ends at or after the frame; a window covers (frame - frames, frame]
+        if i < len(ends) and ordered[i]["frame"] - ordered[i]["frames"] < f["frame"]:
+            count += 1
+            ms += f["frameMs"]
+    return count, ms
+
+
+def alloc_seconds(session, rows):
+    """Seconds of the rows whose allocation was measured: a rate of allocation divides by these, since the lost frames add nothing to it."""
+    return max(0.0, seconds_of(rows) - alloc_unmeasured(session, rows)[1] / 1000.0)
+
+
+def alloc_rate(session, rows):
+    """KB allocated per second over the rows (allocKB, the heap growth), leaving out the frames whose allocation was not measured."""
+    secs = alloc_seconds(session, rows)
+    return total(rows, "allocKB") / secs if secs > 0 else 0.0
+
+
+def alloc_unmeasured_note(session, rows):
+    """What the report says about frames whose allocation was not measured (heap-size counter), or None. The mod counts them in its
+    '# capability-final|allocSource|' line; a recording made before it did has only its slow rows to go on."""
+    if not heap_alloc(session):
+        return None
+    counted = None
+    for p in session.pipe("capability-final", "allocSource"):
+        found = re.search(r"not measured in (\d+) frame", "|".join(p))
+        if found:
+            counted = int(found.group(1))
+    source = ""
+    if counted is None:
+        counted = sum(1 for f in session.slow if f["gcDelta"] > 0 or f["allocKB"] < 0)
+        if not counted:
+            return None
+        source = " (this recording does not count them, so this is its slow rows with a collection)"
+        frames = "at least %d frame%s" % (counted, "" if counted == 1 else "s")
+    else:
+        frames = "%d frame%s" % (counted, "" if counted == 1 else "s")
+    return ("allocation not measured in %s with a collection%s: the heap-size counter falls at one, so what was allocated in them is lost. "
+            "The per-second figure leaves out the %.1f s of those that have a row in these windows." % (frames, source, alloc_unmeasured(session, rows)[1] / 1000.0))
 
 
 def phases_measured(session, rows):
@@ -569,7 +628,7 @@ def findings_for(session, args):
             out.append(Finding("high", "Garbage collection causes most of the hitches",
                                "%d of %d slow frames contain a collection (median %.0f ms, worst %.0f ms); the game collects %.1f times a minute and allocates about %.0f KB per second." %
                                (len(gc_rows), len(slow), gm, max(r["frameMs"] for r in gc_rows), total(S, "gcDelta") / (secs / 60) if secs else 0,
-                                total(S, "allocKB") / secs if secs else 0),
+                                alloc_rate(session, S)),
                                gc_advice(session, inc) + "Find what allocates most: the allocation table in the report and allocKB in profile.csv.", key="gc"))
         if save_rows:
             ev = [e for e in session.events if e["kind"] == "save"]
@@ -906,9 +965,12 @@ def report(session, args, out):
     p("7. GARBAGE COLLECTION AND MEMORY")
     gc = total(body, "gcDelta")
     p("   %d collections (%.1f per minute); the game allocated about %.0f KB per second (%.0f KB per tick); managed heap %.0f-%.0f MB" % (
-        gc, gc / (seconds_of(body) / 60) if seconds_of(body) else 0, total(body, "allocKB") / seconds_of(body) if seconds_of(body) else 0,
+        gc, gc / (seconds_of(body) / 60) if seconds_of(body) else 0, alloc_rate(session, body),
         total(body, "allocKB") / max(1, sum(r["ticks"] for r in body)), min(r["heapMB"] for r in body if r["heapMB"] > 0) if any(r["heapMB"] > 0 for r in body) else 0,
         max(r["heapMB"] for r in body)))
+    note = alloc_unmeasured_note(session, body)
+    if note:
+        p("   " + note)
     ticks = max(1, sum(r["ticks"] for r in body))
     alloc = {}
     for s in SLOTS:
@@ -1045,7 +1107,7 @@ def compare(a, b, args, out):
     if ta and tb:
         rows.append(("ms per tick (game thread)", sum(wsum(Sa, s) for s in TICK_SLOTS) / ta, sum(wsum(Sb, s) for s in TICK_SLOTS) / tb))
     rows.append(("collections per minute", total(Sa, "gcDelta") / (seconds_of(Sa) / 60) if seconds_of(Sa) else 0, total(Sb, "gcDelta") / (seconds_of(Sb) / 60) if seconds_of(Sb) else 0))
-    rows.append(("allocation KB per second", total(Sa, "allocKB") / seconds_of(Sa) if seconds_of(Sa) else 0, total(Sb, "allocKB") / seconds_of(Sb) if seconds_of(Sb) else 0))
+    rows.append(("allocation KB per second", alloc_rate(a, Sa), alloc_rate(b, Sb)))
     for label, va, vb in rows:
         p("   %-26s %10.2f %10.2f %10s" % (label, va, vb, change(va, vb)))
     speeds_a = collections.defaultdict(list)

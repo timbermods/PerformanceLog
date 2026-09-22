@@ -6,13 +6,14 @@ the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (93 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (50 checks).
+`dotnet run --project tests -c Release` (96 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (51 checks).
 
 | What | How |
 |---|---|
 | Frame accounting: slots are exclusive and add up to the frame; unbalanced scopes; other threads ignored; allocation attribution; flags; ticks and buckets; Unity phases; summaries and histograms | Real `Probe` against a scripted clock (`CoreTests`) |
 | The per-frame path allocates nothing | `GC.GetAllocatedBytesForCurrentThread` around 2000 frames; also for a wrapper with the log off |
 | Failure containment: a failing clock switches the probe off, a full ring drops rows and counts them | `CoreTests` |
+| A frame whose allocation counter falls (the heap size at a collection, the source the game gets) is counted as not measured and left out of the allocation rate, not read as 0 | `HeapModeTests`, `tools/test_perflog.py` |
 | The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution | `ProfileTests` |
 | The files: header, columns, invariant number format in any language, text tails, events, a file rewritten whole, an unopenable path, dropped rows, flush on stop | `WriterTests` |
 | `summary.md`, `README.md` and `columns.md` generation | `SummaryTests`, `WriterTests.EndToEnd` |

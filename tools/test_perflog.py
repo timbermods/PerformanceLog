@@ -707,6 +707,27 @@ class FindingTests(unittest.TestCase):
         self.assertNotIn("Ticker.Update", hot, "a hot method only this mod patches is not listed")
         self.assertNotIn("LateUpdateSingleton", hot, "only hot methods are listed")
 
+    def test_heap_mode_leaves_frames_with_a_collection_out_of_allocation_per_second(self):
+        def session(source, final=None):
+            s = Synthetic()
+            s.pipes.append(["capability", "allocSource", source])
+            if final:
+                s.pipes.append(["capability-final", "allocSource", "heap size", final])
+            for i in range(6):
+                if i == 3:
+                    s.slow_frame(5000.0, gcDelta=1.0, allocKB=-100000.0)   # a 5 s frame with a collection: the heap shrank, what it allocated is lost
+                s.window(allocKB=1000.0)
+            return s
+        heap = "GC.GetTotalMemory(false) (coarse: moves only when the heap grows)"
+        text = self.report(session(heap))
+        self.assertIn("allocated about 109 KB per second", text, "6000 KB over the 55 s whose allocation was measured")
+        self.assertIn("not measured in at least 1 frame", text, "an older recording does not count them, so the slow rows are the evidence")
+        text = self.report(session(heap, "allocation not measured in 2 frames (5.0 s)"))
+        self.assertIn("not measured in 2 frames", text, "the mod's own count is used when the recording has it")
+        text = self.report(session("GC.GetAllocatedBytesForCurrentThread (exact)"))
+        self.assertIn("allocated about 100 KB per second", text, "an exact counter does not fall at a collection")
+        self.assertNotIn("not measured in", text)
+
     def test_hitches_on_a_rhythm_are_matched_to_the_autosave(self):
         s = Synthetic()
         for i in range(12):

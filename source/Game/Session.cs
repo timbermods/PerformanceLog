@@ -391,6 +391,7 @@ namespace PerformanceLog
                 // What each source produced has to be read here, on the game thread, before they are shut down.
                 var final = new List<string>(UnityExtras.FinalLines());
                 final.Add("# capability-final|playerLoop|" + (PlayerLoopTiming.Installed > 0 ? "timed " + PlayerLoopTiming.Installed + " phases" : "not installed"));
+                final.Add(Probe.AllocFinalLine());
                 for (int i = 0; i < Instrumentation.HitCount; i++)
                     final.Add("# capability-final|patchCalls|" + Instrumentation.HitName(i) + "|" +
                               (Instrumentation.InstalledHit[i] ? Instrumentation.Hits[i] + (Instrumentation.Hits[i] == 0 ? "|never ran" : "") : "0|patch not installed"));

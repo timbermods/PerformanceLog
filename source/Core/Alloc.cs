@@ -27,6 +27,8 @@ namespace PerformanceLog
         public static string Describe() => Note.Length == 0 ? ModeName : ModeName + "; " + Note;
 
         static Func<long> threadBytes;
+        // A test's stand-in for the heap size (see UseTestSource); null in a game.
+        static Func<long> heapBytes;
 
         /// <summary>True when allocation can be measured at all.</summary>
         public static bool Enabled => Mode != ModeNone;
@@ -35,6 +37,7 @@ namespace PerformanceLog
         public static void Init(bool preferHeap = false)
         {
             threadBytes = null;
+            heapBytes = null;
             Mode = ModeNone;
             Note = "";
             try
@@ -66,12 +69,16 @@ namespace PerformanceLog
             }
         }
 
-        /// <summary>Replaces the counter with one the caller moves by hand. For tests only. Null goes back to <see cref="Init"/>.</summary>
-        public static void UseTestSource(Func<long> source)
+        /// <summary>
+        /// Replaces the counter with one the caller moves by hand. For tests only. Null goes back to <see cref="Init"/>. With
+        /// <paramref name="asHeapSize"/> it stands in for the heap size (<see cref="ModeHeap"/>), the counter the game gets.
+        /// </summary>
+        public static void UseTestSource(Func<long> source, bool asHeapSize = false)
         {
             if (source == null) { Init(); return; }
-            threadBytes = source;
-            Mode = ModeThread;
+            threadBytes = asHeapSize ? null : source;
+            heapBytes = asHeapSize ? source : null;
+            Mode = asHeapSize ? ModeHeap : ModeThread;
         }
 
         /// <summary>The counter now, in bytes. Differences between two readings are what matters.</summary>
@@ -80,7 +87,7 @@ namespace PerformanceLog
             switch (Mode)
             {
                 case ModeThread: return threadBytes();
-                case ModeHeap: return GC.GetTotalMemory(false);
+                case ModeHeap: return heapBytes != null ? heapBytes() : GC.GetTotalMemory(false);
                 default: return 0;
             }
         }

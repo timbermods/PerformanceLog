@@ -55,6 +55,12 @@ namespace PerformanceLog
         public long SlowRowsSkipped;
         public double SlowMs;
         public double FirstFrameMs;
+        /// <summary>
+        /// Frames whose allocation could not be measured, and their time: the allocation counter fell during them. With the heap size as the
+        /// counter (<see cref="Alloc.ModeHeap"/>) that is every frame with a garbage collection, which loses what the frame allocated.
+        /// </summary>
+        public long AllocUnmeasuredFrames;
+        public double AllocUnmeasuredMs;
 
         /// <summary>A copy that another thread can read while the game thread goes on counting.</summary>
         public SessionStats Clone()
@@ -150,6 +156,8 @@ namespace PerformanceLog
 
         static int frameTicks, frameBuckets, frameScopes, bucketsInTick;
         static double frameParTickMs;
+        // The allocation counter went down inside a timed scope this frame (a collection, when it is the heap size).
+        static bool frameAllocFell;
 
         const int WorstKept = 10;
         static readonly List<WorstFrame> worst = new List<WorstFrame>();
@@ -325,6 +333,7 @@ namespace PerformanceLog
                     long passUp;
                     if (a0 >= 0)
                     {
+                        if (allocNow < a0) frameAllocFell = true;
                         long elapsedAlloc = Math.Max(0, allocNow - a0);
                         frameAlloc[stackSlot[d]] += Math.Max(0, elapsedAlloc - childAlloc);
                         passUp = elapsedAlloc;
@@ -496,8 +505,12 @@ namespace PerformanceLog
             r[Columns.OtherMs] = Math.Max(0, frameMs - accounted);
 
             double allocKb = (memory - lastMemory) / 1024.0;
-            // What was allocated outside every measured section, from the same counter the sections use (which never goes down at a collection).
+            // What was allocated outside every measured section, from the same counter the sections use. Only the exact per-thread counter never
+            // goes down; the heap size (Alloc.ModeHeap, what the game's Mono offers) falls at a collection, and a frame with one has lost what it
+            // allocated, so its KB columns read low (0 when the heap shrank). No column says so: the frame is counted instead (SessionStats.
+            // AllocUnmeasuredFrames, and the capability-final line from AllocFinalLine), and its row is the one with gcDelta > 0 or a negative allocKB.
             long allocSource = Alloc.Enabled ? Alloc.Read() : 0;
+            bool allocUnmeasured = Alloc.Enabled && (frameAllocFell || allocSource < lastAllocSource || (Alloc.Mode == Alloc.ModeHeap && gc != lastGc));
             r[Columns.OtherKB] = Math.Max(0, (allocSource - lastAllocSource) / 1024.0 - allocAccounted);
             lastAllocSource = allocSource;
             r[Columns.GcDelta] = gc - lastGc;
@@ -535,6 +548,7 @@ namespace PerformanceLog
             if (sessionFrames == 0 || heapMb < s.HeapMinMB) s.HeapMinMB = heapMb;
             if (heapMb > s.HeapMaxMB) s.HeapMaxMB = heapMb;
             if (sessionFrames == 0) s.FirstFrameMs = frameMs;
+            if (allocUnmeasured) { s.AllocUnmeasuredFrames++; s.AllocUnmeasuredMs += frameMs; }
             if (slow)
             {
                 s.SlowFrames++; s.SlowMs += frameMs;
@@ -577,6 +591,7 @@ namespace PerformanceLog
             Array.Clear(framePhase, 0, framePhase.Length);
             depth = 0; generation++;
             frameTicks = 0; frameBuckets = 0; frameScopes = 0; frameParTickMs = 0;
+            frameAllocFell = false;
         }
 
         static void Accumulate(double[] into, double[] r, bool first)
@@ -692,6 +707,24 @@ namespace PerformanceLog
 
         /// <summary>Counts over the session so far. The object is replaced when a new log starts.</summary>
         public static SessionStats Stats => stats;
+
+        /// <summary>
+        /// The <c># capability-final|allocSource|</c> line: whether allocation was measured in every frame. The frames it was not measured in
+        /// (see <see cref="SessionStats.AllocUnmeasuredFrames"/>) are counted here rather than in a column, so the file format stays the same.
+        /// </summary>
+        public static string AllocFinalLine()
+        {
+            const string head = "# capability-final|allocSource|";
+            if (!Alloc.Enabled) return head + "none|allocation was not measured";
+            bool heap = Alloc.Mode == Alloc.ModeHeap;
+            long frames = stats.AllocUnmeasuredFrames;
+            if (frames == 0) return head + (heap ? "heap size" : "exact") + "|measured in every frame";
+            string count = "allocation not measured in " + frames + (frames == 1 ? " frame (" : " frames (") +
+                           (stats.AllocUnmeasuredMs / 1000).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " s)";
+            if (!heap) return head + "exact|" + count + ": the counter fell during them, so their KB columns read low";
+            return head + "heap size|" + count + " with a garbage collection: the heap-size counter falls at one, so what they allocated is lost and their KB " +
+                   "columns read low. In frames.csv they are the rows with gcDelta above 0 or a negative allocKB.";
+        }
 
         static double UnixMs()
         {
