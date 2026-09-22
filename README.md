@@ -4,7 +4,7 @@ A Timberborn 1.1 mod (built against **1.1.2.4**) that measures **where the game'
 person, or an AI assistant such as Claude, can read to find out why a game is slow. It is a diagnostic tool for finding performance problems in
 the game and in other mods. It does nothing else.
 
-Version **0.1.4** is a **preview**, published as a pre-release. Its automated checks run against the game's real assemblies.
+Version **0.1.4** is a **preview** (a 0.x version), published as the latest release. Its automated checks run against the game's real assemblies.
 Version 0.1.0 was the first to be played (a 31 minute session with nine mods, ending in a normal exit): every patch applied and the recording was complete.
 That first recording also showed several defects, fixed in 0.1.1. 0.1.2 added an in-game settings page, and 0.1.3 made the most detailed profile the default.
 0.1.1 and 0.1.3 have been played since. A 44 minute 0.1.3 recording with ten mods shows the new defaults working, and every 0.1.1 fix that a recording can show.
@@ -20,7 +20,7 @@ BeaverBuddies making a Harmony patch draws random numbers, so it puts them back 
 
 ## Install
 
-1. Open the [Releases page](https://github.com/timbermods/PerformanceLog/releases) and pick the newest pre-release (there is no stable release yet).
+1. Open the [Releases page](https://github.com/timbermods/PerformanceLog/releases) and pick the one marked **Latest**. Every 0.x version is a preview.
    Under **Assets**, download `PerformanceLog-<version>.zip`, not "Source code".
 2. Close Timberborn. Extract the ZIP into `Documents\Timberborn\Mods`. It contains one `PerformanceLog` folder.
 3. Subscribe to the **Harmony** mod (2.4.1 or newer) and the **Mod Settings** mod (1.1.0.0 or newer) on the Steam Workshop. Performance Log needs both.

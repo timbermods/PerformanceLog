@@ -70,8 +70,9 @@ To read the game's own code (the way every patch target here was checked): `ilsp
 - **Add a finding to the analysis:** `findings_for` in `tools/perflog.py`. A finding needs evidence (numbers from the session) and a "next" step, must not fire on a healthy
   session (there are tests for that: `FindingTests`), and must say "consistent with", not "caused by", unless the data proves it.
 - **Release:** bump `<Version>` in `source/PerformanceLog.csproj` AND `Version` in `packaging/manifest.json` (build.ps1 refuses a mismatch), update `CHANGELOG.md`, run `.\build.ps1`,
-  tag `vX.Y.Z`, and create a GitHub release with `dist\PerformanceLog-X.Y.Z.zip`. Mark it a pre-release until it has been played in a game. **Do not add this mod to the timbermods
-  catalog site or create a website for it until asked.**
+  tag `vX.Y.Z`, and create a GitHub release with `dist\PerformanceLog-X.Y.Z.zip`. Publish it as the latest release, not a pre-release (the README's install step says to
+  pick the one marked Latest); the 0.x version says it is a preview, and `CHANGELOG.md` and `docs/TESTING.md` say what has not been played. **Do not add this mod to the
+  timbermods catalog site or create a website for it until asked.**
 
 ## Things that are not obvious
 
