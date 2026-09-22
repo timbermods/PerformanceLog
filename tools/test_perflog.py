@@ -390,6 +390,26 @@ class HelperTests(unittest.TestCase):
         self.assertEqual("TheClass", perflog.short("Some.Very.Long.Namespace.That.Goes.On.And.On.Forever.And.Ever.TheClass", 40))
         self.assertEqual("Short.Name", perflog.short("Short.Name"))
 
+    def test_other_ms_is_split_by_unity_phase(self):
+        # A 20 ms frame: 4 ms of entity ticks and 2 ms of singleton updates inside a 9 ms Update phase, 0.5 ms of late singletons inside a
+        # 2.5 ms LateUpdate phase, 7.5 ms of plPost, 0.2 ms of plTime and 0.8 ms between the phases. otherMs is the 13.5 ms not timed.
+        def row(**columns):
+            r = {"frames": 100.0, "frameMs": 20.0, "tickMs": 0.0, "singMs": 0.0, "entMs": 4.0, "parWaitMs": 0.0, "parStartMs": 0.0, "updMs": 2.0,
+                 "lateMs": 0.5, "saveMs": 0.0, "plTime": 0.2, "plInit": 0.0, "plEarly": 0.0, "plFixed": 0.0, "plPre": 0.0, "plUpdate": 9.0,
+                 "plLate": 2.5, "plPost": 7.5}
+            r.update(columns)
+            r["otherMs"] = r["frameMs"] - sum(r[s] for s in perflog.SLOTS)
+            return r
+        expect = {"update": 3.0, "late": 2.0, "post": 7.5, "phases": 0.2, "between": 0.8}
+        for name, r in (("no save", row()),
+                        ("a save deferred to the end of a tick runs in Update", row(frameMs=23.0, saveMs=3.0, plUpdate=12.0)),
+                        ("the game's own save runs in LateUpdate", row(frameMs=23.0, saveMs=3.0, plLate=5.5))):
+            got = perflog.split_other(r)
+            for key, value in expect.items():
+                self.assertAlmostEqual(value, got[key], places=6, msg="%s: %s" % (name, key))
+        both = perflog.other_by_phase([row(), row(frames=300.0, plUpdate=11.0, frameMs=22.0)])
+        self.assertAlmostEqual((3.0 * 100 + 5.0 * 300) / 400, both["update"], places=6, msg="weighted by frames")
+
     def test_steady_leaves_out_warm_up_paused_and_background(self):
         s = Synthetic()
         try:
@@ -421,6 +441,31 @@ class FindingTests(unittest.TestCase):
         text = self.report(s)
         self.assertIn("Most of the frame is not the game's or any mod's code", text)
         self.assertIn("busy for only", text)
+
+    def test_the_report_splits_other_ms_by_unity_phase(self):
+        s = Synthetic()
+        for _ in range(8):
+            s.window(frame_ms=20.0, entMs=4.0, updMs=2.0, lateMs=0.5, plTime=0.2, plUpdate=9.0, plLate=2.5, plPost=7.5)
+        text = self.report(s)
+        section = text.split("3. WHERE AN AVERAGE FRAME GOES")[1].split("4. WHAT THIS POINTS TO")[0]
+        self.assertIn("otherMs by Unity phase", section)
+
+        def part(label):
+            return [l for l in section.splitlines() if l.strip().startswith(label)][0]
+        self.assertIn("3.00 ms", part("Update phase"))
+        self.assertIn("2.00 ms", part("LateUpdate phase"))
+        self.assertIn("other work in Unity's LateUpdate phase", part("LateUpdate phase"), "not blamed on mods")
+        self.assertIn("7.50 ms", part("plPost"))
+        self.assertIn("0.80 ms", part("between the phases"))
+
+    def test_other_ms_in_the_update_phase_points_at_scripts_not_the_graphics_card(self):
+        s = Synthetic()
+        for _ in range(8):
+            s.window(frame_ms=40.0, updMs=1.0, entMs=1.0, plUpdate=31.0, plLate=1.0, plPost=4.0, mainCpuMs=38.0, procCpuMs=40.0)
+        text = self.report(s)
+        self.assertIn("Most of the frame is other work in Unity's Update phase", text)
+        self.assertNotIn("Most of the frame is not the game's or any mod's code", text)
+        self.assertNotIn("Likely the graphics card", text)
 
     def test_vsync_capped_is_healthy(self):
         s = Synthetic(header={"display": "vSyncCount=1 targetFrameRate=-1 resolution=1920x1080 refreshHz=60.00 fullScreen=Windowed"})

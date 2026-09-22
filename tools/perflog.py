@@ -31,6 +31,18 @@ SLOT_MEANING = {
     "otherMs": "the rest: drawing, other scripts, other mods, the system",
 }
 PHASES = ["plTime", "plInit", "plEarly", "plFixed", "plPre", "plUpdate", "plLate", "plPost"]
+# The timed parts that run inside Unity's Update phase (the game's tick loop and its singleton updates). lateMs runs in the LateUpdate phase
+# (plLate); nothing this mod times runs in the phases before Update.
+UPDATE_PHASE_SLOTS = TICK_SLOTS + ["updMs"]
+EARLY_PHASES = ["plTime", "plInit", "plEarly", "plFixed", "plPre"]
+# How otherMs splits by phase: (key, label, what it is). Summary.OtherByPhase in the mod splits the same way.
+OTHER_SPLIT = [
+    ("update", "Update phase, outside the timed parts", "other scripts' Update (the game's and mods' MonoBehaviours) and coroutines"),
+    ("late", "LateUpdate phase, outside lateMs", "other work in Unity's LateUpdate phase: animation, UI Toolkit, scripts' LateUpdate"),
+    ("post", "plPost", "drawing, presenting the frame and the wait for vertical sync"),
+    ("phases", "Unity's other phases", "plTime to plPre: time, input, physics"),
+    ("between", "between the phases", "what falls between Unity's phases"),
+]
 FRAME_EDGES_DEFAULT = [4, 6, 8.5, 11.5, 14, 17.5, 21, 25, 30, 35, 42, 50, 75, 100, 200, 400]
 REQUIRED = ["type", "frame", "tick", "utcMs", "frames", "frameMs", "maxFrameMs", "ticks", "speed", "paused", "saving", "unfocused"] + SLOTS + \
     ["otherMs", "gcDelta", "heapMB", "allocKB", "overheadUs", "probeUs"]
@@ -253,6 +265,39 @@ def total(rows, column):
 
 def seconds_of(rows):
     return sum(r["frameMs"] * r["frames"] for r in rows) / 1000.0
+
+
+def phases_measured(session, rows):
+    """True when the recording timed Unity's phases (the playerLoop capability), so otherMs can be split by them."""
+    return all(p in session.columns for p in PHASES) and sum(wmean(rows, p) for p in PHASES) > 0
+
+
+def split_other(r):
+    """otherMs of one row (times per frame) by Unity phase: each phase less the timed parts that run in it, plPost, the phases before Update,
+    and what falls between the phases. The game saves in its LateUpdate and a mod that defers the save to the end of a tick (BeaverBuddies)
+    in Update; the row does not say which, so saveMs is taken out of the phase with more room left. That is the phase it ran in, except for a
+    save shorter than the gap between the two phases' own remainders, and then the error is less than the save."""
+    update = r.get("plUpdate", 0.0) - sum(r[s] for s in UPDATE_PHASE_SLOTS)
+    late = r.get("plLate", 0.0) - r["lateMs"]
+    if r["saveMs"] > 0:
+        if late >= update:
+            late -= r["saveMs"]
+        else:
+            update -= r["saveMs"]
+    parts = collections.OrderedDict([("update", max(0.0, update)), ("late", max(0.0, late)), ("post", r.get("plPost", 0.0)),
+                                     ("phases", sum(r.get(p, 0.0) for p in EARLY_PHASES))])
+    parts["between"] = max(0.0, r["otherMs"] - sum(parts.values()))
+    return parts
+
+
+def other_by_phase(rows):
+    """split_other over summary rows, in ms per frame (each row weighted by its frames)."""
+    frames = sum(r["frames"] for r in rows)
+    out = collections.OrderedDict((key, 0.0) for key, _, _ in OTHER_SPLIT)
+    for r in rows:
+        for key, value in split_other(r).items():
+            out[key] += value * r["frames"]
+    return collections.OrderedDict((k, v / frames) for k, v in out.items()) if frames else out
 
 
 def frame_edges(session):
@@ -514,13 +559,30 @@ def findings_for(session, args):
                                "That wait is free: the computer had time to spare. Look for slowness in the slow frames and in the simulation instead."))
         elif other >= 0.5 and mean >= SLOW_MEAN_MS:
             evidence = "%.0f%% of an average frame is outside every part this mod times" % (100 * other)
-            if plpost >= 0.4:
-                evidence += "; %.0f%% of it is Unity's post-late-update phase (drawing, presenting, the wait for vertical sync)" % (100 * plpost)
-            if busy is not None:
-                evidence += "; the game thread was busy for only %.0f%% of the frame" % (100 * busy)
-            display = session.h("display")
-            out.append(Finding("high" if plpost >= 0.4 or (busy is not None and busy < 0.7) else "info", "Most of the frame is not the game's or any mod's code",
-                               evidence + ".", "Likely the graphics card or vertical sync (%s). Check draw calls (prDraw, prSetPass), the resolution and quality settings; a mod is unlikely to be the cause." % (display or "display settings not recorded"), key="gpu"))
+            # Which phase holds it decides where to look: plPost is drawing and waiting, the other two are code that runs every frame.
+            split = other_by_phase(S) if phases_measured(session, S) else None
+            biggest = max(("update", "late", "post"), key=lambda k: split[k]) if split else "post"
+            if biggest != "post":
+                evidence += ("; per frame, %.1f ms of it is in Unity's Update phase outside the timed parts, %.1f ms in the LateUpdate phase outside lateMs "
+                             "and %.1f ms in plPost (drawing and the wait for vertical sync)" % (split["update"], split["late"], split["post"]))
+                if biggest == "update":
+                    title = "Most of the frame is other work in Unity's Update phase, outside every part this mod times"
+                    check = ("That is code that runs every frame beside the game's tick loop and singletons: the game's own and other mods' scripts "
+                             "(MonoBehaviour Update, coroutines). The graphics card is not what holds the frame. Compare a recording without a suspected "
+                             "mod, or time a suspect method with a Watch entry.")
+                else:
+                    title = "Most of the frame is other work in Unity's LateUpdate phase, outside every part this mod times"
+                    check = ("Unity's animation and user interface (UI Toolkit) run in this phase beside scripts' LateUpdate, and grow with what is on screen. "
+                             "Compare a recording with fewer animated characters in view or no panel open, and one without a suspected mod.")
+                out.append(Finding("high" if split[biggest] / mean >= 0.4 else "info", title, evidence + ".", check, key="other-" + biggest))
+            else:
+                if plpost >= 0.4:
+                    evidence += "; %.0f%% of it is Unity's post-late-update phase (drawing, presenting, the wait for vertical sync)" % (100 * plpost)
+                if busy is not None:
+                    evidence += "; the game thread was busy for only %.0f%% of the frame" % (100 * busy)
+                display = session.h("display")
+                out.append(Finding("high" if plpost >= 0.4 or (busy is not None and busy < 0.7) else "info", "Most of the frame is not the game's or any mod's code",
+                                   evidence + ".", "Likely the graphics card or vertical sync (%s). Check draw calls (prDraw, prSetPass), the resolution and quality settings; a mod is unlikely to be the cause." % (display or "display settings not recorded"), key="gpu"))
         if shares["updMs"] >= 0.15 and mean >= SLOW_MEAN_MS * 0.8:
             out.append(Finding("high" if shares["updMs"] >= 0.3 else "info", "Per-frame singleton updates take %.0f%% of a frame (%.1f ms)" % (100 * shares["updMs"], wmean(S, "updMs")),
                                "These run every frame whatever the game speed: the user interface, the camera, input and many mods.",
@@ -686,6 +748,12 @@ def report(session, args, out):
     ph = {x: wmean(body, x) for x in PHASES if x in session.columns}
     if ph and sum(ph.values()) > 0:
         p("   Unity's phases: " + ", ".join("%s %.2f ms" % (k, v) for k, v in ph.items() if v >= 0.05) + "   (the wait for vertical sync is in one of them, usually plPost)")
+    if phases_measured(session, body):
+        other = wmean(body, "otherMs")
+        split = other_by_phase(body)
+        p("   otherMs by Unity phase (each phase less the timed parts that run in it):")
+        for key, label, meaning in OTHER_SPLIT:
+            p("     %-38s %6.2f ms %4s   %s" % (label, split[key], pct(split[key], other), meaning))
     if wmean(body, "mainCpuMs") > 0:
         p("   the game thread was busy %.0f%% of the frame (%.1f of %.1f ms); the process used %.1f cores' worth" % (
             100 * wmean(body, "mainCpuMs") / mean, wmean(body, "mainCpuMs"), mean, wmean(body, "procCpuMs") / mean if mean else 0))
@@ -806,6 +874,7 @@ def report_json(session, args):
         "meanFrameMs": mean, "p50": percentile(session, S, 0.5), "p90": percentile(session, S, 0.9), "p99": percentile(session, S, 0.99),
         "slowFrames": len(session.slow), "knownIssues": known_issues(session),
         "slotsMsPerFrame": {s: wmean(S, s) for s in SLOTS + ["otherMs"]},
+        "otherMsByPhase": dict(other_by_phase(S)) if phases_measured(session, S) else None,
         "collections": total(S, "gcDelta"),
         "findings": [{"severity": f.severity, "title": f.title, "evidence": f.evidence, "check": f.check} for f in findings_for(session, args)],
     }

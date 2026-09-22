@@ -55,6 +55,16 @@ Unity's phases of a frame (the wait for vertical sync is in one of them, usually
 | `plUpdate` | 3.75 | 22.3% |
 | `plPost` | 12.75 | 76.0% |
 
+How `otherMs` splits by Unity phase (each phase less the timed parts that run in it):
+
+| Part of `otherMs` | ms per frame | Share of `otherMs` |
+|---|---|---|
+| Update phase outside the timed parts: other scripts' Update (the game's and mods' MonoBehaviours) and coroutines | 0.02 | 0.1% |
+| LateUpdate phase outside `lateMs`: other work in Unity's LateUpdate phase (animation, UI Toolkit, scripts' LateUpdate) | 0.00 | 0.0% |
+| `plPost`: drawing, presenting the frame and the wait for vertical sync | 12.75 | 98.2% |
+| Unity's other phases (`plTime` to `plPre`: time, input, physics) | 0.20 | 1.5% |
+| Between the phases | 0.02 | 0.2% |
+
 ## Simulation ticks
 
 - 2440 ticks in 300 s, so 8.1 ticks per second on average. The game's tick is 0.30 s of game time, so at speed 1 it runs 3.3 ticks per second, proportionally more at higher speeds.

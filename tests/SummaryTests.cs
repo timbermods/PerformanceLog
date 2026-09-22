@@ -16,6 +16,7 @@ namespace PerformanceLog.Tests
             yield return ("Summary: component time is rolled up by mod, and load steps are listed slowest first", ComponentAndLoadTables);
             yield return ("Summary: slow frames without a row of their own are said to be counted", SkippedRowsAreExplained);
             yield return ("Summary: a slow frame's Blame names only a singleton that took a real part of it, else says what the frame had", BlameNeedsARealShare);
+            yield return ("Summary: otherMs is split by Unity phase, each phase less the timed parts that run in it", OtherSplitByPhase);
             yield return ("Summary: long class names are shortened and short ones kept", ShortNames);
             yield return ("Readme: placeholders are filled and no placeholder is left", ReadmePlaceholders);
         }
@@ -159,6 +160,54 @@ namespace PerformanceLog.Tests
                 Check(hitch.Contains("RouteMapsBackground 95"), "the singleton that took the frame is named: " + hitch);
                 Check(!hitch.Contains("PanelStack") && !hitch.Contains("stood out"), "and only it: " + hitch);
                 Check(mixed.Contains("DistrictCitizenAssigner 6") && !mixed.Contains("PanelStack"), "5 ms or more is named whatever the share: " + mixed);
+            }
+            finally { rig.Dispose(); }
+        }
+
+        static void OtherSplitByPhase()
+        {
+            var rig = new Rig(thresholdMs: 1000);
+            try
+            {
+                // A 20 ms frame, laid out as Unity runs it: 0.2 ms of plTime; a 9 ms Update phase holding 2 ms of singleton updates and 4 ms of
+                // entity ticks; a 2.5 ms LateUpdate phase holding 0.5 ms of late singletons; 0.8 ms between the phases; 7.5 ms of plPost.
+                for (int i = 0; i < 5; i++)
+                {
+                    Probe.PhaseMark(0, true); rig.Advance(0.2); Probe.PhaseMark(0, false);
+                    Probe.PhaseMark(5, true);
+                    long update = Probe.Begin(Slot.Update); rig.Advance(2); Probe.End(update);
+                    long entities = Probe.Begin(Slot.Entities); rig.Advance(4); Probe.End(entities);
+                    rig.Advance(3);
+                    Probe.PhaseMark(5, false);
+                    Probe.PhaseMark(6, true);
+                    long late = Probe.Begin(Slot.LateUpdate); rig.Advance(0.5); Probe.End(late);
+                    rig.Advance(2);
+                    Probe.PhaseMark(6, false);
+                    rig.Advance(0.8);
+                    Probe.PhaseMark(7, true); rig.Advance(7.5); Probe.PhaseMark(7, false);
+                    rig.Frame();
+                }
+                double[] row = Probe.SessionRow();
+                Near(13.5, row[Columns.OtherMs], .001, "otherMs is the time no part covers");
+                string text = Summary.Render(new SummaryInput { SessionId = "phases", Row = row, Stats = Probe.Stats, Seconds = 1 });
+                Check(text.Contains("How `otherMs` splits by Unity phase"), "the split is not in the summary");
+                string Line(string summary, string start) => summary.Split('\n').Single(l => l.StartsWith("| " + start));
+                Check(Line(text, "Update phase").Contains("| 3.00 |"), "the Update phase less the timed parts in it: " + Line(text, "Update phase"));
+                Check(Line(text, "LateUpdate phase").Contains("| 2.00 |"), "the LateUpdate phase less lateMs: " + Line(text, "LateUpdate phase"));
+                Check(Line(text, "LateUpdate phase").Contains("other work in Unity's LateUpdate phase"), "and it is not called mods' work");
+                Check(Line(text, "`plPost`:").Contains("| 7.50 |"), Line(text, "`plPost`:"));
+                Check(Line(text, "Unity's other phases").Contains("| 0.20 |"), Line(text, "Unity's other phases"));
+                Check(Line(text, "Between the phases").Contains("| 0.80 |"), Line(text, "Between the phases"));
+
+                // A save is taken out of the phase it ran in: LateUpdate for the game's own, Update when a mod defers it to the end of a tick.
+                foreach (int phase in new[] { 6, 5 })
+                {
+                    double[] saved = (double[])row.Clone();
+                    saved[Columns.SlotBase + (int)Slot.Save] = 3; saved[Columns.PhaseBase + phase] += 3; saved[Columns.FrameMs] += 3;
+                    string withSave = Summary.Render(new SummaryInput { SessionId = "save", Row = saved, Stats = Probe.Stats, Seconds = 1 });
+                    Check(Line(withSave, "Update phase").Contains("| 3.00 |") && Line(withSave, "LateUpdate phase").Contains("| 2.00 |"),
+                        "a save in " + Columns.PhaseNames[phase] + " is taken out of that phase: " + Line(withSave, "Update phase") + " / " + Line(withSave, "LateUpdate phase"));
+                }
             }
             finally { rig.Dispose(); }
         }

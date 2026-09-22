@@ -155,8 +155,52 @@ namespace PerformanceLog
                     t.Append("| `").Append(Columns.PhaseNames[i]).Append("` | ").Append(F(ms, 2)).Append(" | ").Append(Pct(ms, mean)).Append(" |\n");
                 }
                 t.Append('\n');
+                double[] split = OtherByPhase(r);
+                t.Append("How `otherMs` splits by Unity phase (each phase less the timed parts that run in it):\n\n| Part of `otherMs` | ms per frame | Share of `otherMs` |\n|---|---|---|\n");
+                for (int i = 0; i < OtherSplitNames.Length; i++)
+                    t.Append("| ").Append(OtherSplitNames[i]).Append(" | ").Append(F(split[i], 2)).Append(" | ").Append(Pct(split[i], r[Columns.OtherMs])).Append(" |\n");
+                t.Append('\n');
             }
             else t.Append("_Unity's frame phases were not measured (see the capabilities below)._\n\n");
+        }
+
+        static readonly int UpdatePhase = Array.IndexOf(Columns.PhaseNames, "plUpdate"), LatePhase = Array.IndexOf(Columns.PhaseNames, "plLate"),
+            PostPhase = Array.IndexOf(Columns.PhaseNames, "plPost");
+
+        static readonly string[] OtherSplitNames =
+        {
+            "Update phase outside the timed parts: other scripts' Update (the game's and mods' MonoBehaviours) and coroutines",
+            "LateUpdate phase outside `lateMs`: other work in Unity's LateUpdate phase (animation, UI Toolkit, scripts' LateUpdate)",
+            "`plPost`: drawing, presenting the frame and the wait for vertical sync",
+            "Unity's other phases (`plTime` to `plPre`: time, input, physics)",
+            "Between the phases",
+        };
+
+        /// <summary>
+        /// <c>otherMs</c> of a row split by Unity phase, in the order of <see cref="OtherSplitNames"/>: the Update phase less the timed parts that run
+        /// in it (the tick loop with its parts, and the singleton updates), the LateUpdate phase less <c>lateMs</c>, <c>plPost</c>, the phases before
+        /// Update, and what falls between the phases. The game saves in its LateUpdate and a mod that defers the save to the end of a tick
+        /// (BeaverBuddies) in Update; the row does not say which, so <c>saveMs</c> is taken out of the phase with more room left. That is the phase it
+        /// ran in, except for a save shorter than the gap between the two phases' own remainders, and then the error is less than the save.
+        /// tools/perflog.py (split_other) splits the same way.
+        /// </summary>
+        static double[] OtherByPhase(double[] r)
+        {
+            double update = r[Columns.PhaseBase + UpdatePhase], late = r[Columns.PhaseBase + LatePhase] - r[Columns.SlotBase + (int)Slot.LateUpdate];
+            for (int i = 0; i <= (int)Slot.Update; i++) update -= r[Columns.SlotBase + i];
+            double save = r[Columns.SlotBase + (int)Slot.Save];
+            if (save > 0)
+            {
+                if (late >= update) late -= save;
+                else update -= save;
+            }
+            var split = new double[OtherSplitNames.Length];
+            split[0] = Math.Max(0, update);
+            split[1] = Math.Max(0, late);
+            split[2] = r[Columns.PhaseBase + PostPhase];
+            for (int i = 0; i < UpdatePhase; i++) split[3] += r[Columns.PhaseBase + i];
+            split[4] = Math.Max(0, r[Columns.OtherMs] - split[0] - split[1] - split[2] - split[3]);
+            return split;
         }
 
         static void Ticks(StringBuilder t, SummaryInput s, double[] r)

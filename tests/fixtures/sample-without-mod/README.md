@@ -61,6 +61,10 @@ Start by writing down what the complaint is, because the causes differ:
    game thread is still not busy. Then check `prDraw`/`prSetPass`/`prBatches`/`prTris` (a lot of drawing), the resolution and `# gpu|`. This is a
    graphics-settings problem, not a mod problem, unless a mod adds drawing.
    When frames are pinned at the sync interval, **compare work, not frame time**: the sum of the timed parts (everything but `otherMs`) is what a change in the game or a mod moves.
+   **If `otherMs` is big but `plPost` is not**, the time is code, not drawing. `summary.md` (and `perflog.py report`) split `otherMs` by phase:
+   `plUpdate` less the timed parts that run in it (`tickMs` to `parStartMs`, `updMs`) is other scripts' Update (the game's own MonoBehaviours, mods'
+   scripts, coroutines); `plLate` less `lateMs` is other work in Unity's LateUpdate phase (animation, UI Toolkit, scripts' LateUpdate), which is not
+   necessarily a mod. A save runs in `plLate` for the game's own and in `plUpdate` when a mod defers it to the end of a tick.
 2. **`updMs` is big**: per-frame singleton updates (the user interface, the camera, input, and many mods). `profile.csv` rows of kind
    `update-singleton` name them, with `mod`.
 3. **`tickMs`, `singMs`, `entMs`, `parWaitMs`, `parStartMs` are big**: the simulation. Divide by `ticks` to get ms per tick.
