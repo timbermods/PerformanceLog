@@ -52,6 +52,8 @@ namespace PerformanceLog.Tests
             yield return ("Watch: named methods are found, and the ones that cannot be patched say why", WatchResolution);
             yield return ("Config: settings are read, clamped and checked", ConfigParsing);
             yield return ("Config: a missing file gives the defaults and a bad line is reported, not fatal", ConfigProblems);
+            yield return ("Settings: the in-game panel's values are clamped onto a Config the same way the .cfg file is, and only those six", SettingsApplyTo);
+            yield return ("Settings: the panel starts from whatever PerformanceLog.cfg already had, not the field defaults", SettingsSeedFromTheCfgFile);
             yield return ("Harmony: whether patches can be applied in this test process (informational)", HarmonyInfo);
         }
 
@@ -663,6 +665,51 @@ namespace PerformanceLog.Tests
                 Equal(false, loaded.Enabled); Equal(20.0, loaded.SlowFrameMs);
             }
             finally { System.IO.Directory.Delete(dir, true); }
+        }
+
+        static void SettingsApplyTo()
+        {
+            // Constructed with no real Mod Settings dependencies: ApplyTo never touches them (it only reads .Value off each property),
+            // so this exercises the real clamping logic without needing ISettings/ModRepository/ModSettingsOwnerRegistry fakes.
+            var owner = new PerformanceSettings(null, null, null);
+            owner.SlowFrameMs.SetValue(999999);          // clamped by the widget itself to Config.SlowFrameMsMax
+            owner.SummarySeconds.SetValue(-5);           // clamped to Config.SummarySecondsMin
+            owner.ProfileSeconds.SetValue(42);
+            owner.SpikeContributors.SetValue(-3);         // clamped to 0
+            owner.MaxSlowRowsPerMinute.SetValue(1);       // clamped to Config.MaxSlowRowsPerMinuteMin
+            owner.OverheadBudgetPercent.SetValue(999f);   // not self-clamping: ApplyTo must clamp it
+            var cfg = new Config();
+            owner.ApplyTo(cfg);
+            Equal(Config.SlowFrameMsMax, cfg.SlowFrameMs);
+            Equal(Config.SummarySecondsMin, cfg.SummarySeconds);
+            Equal(42.0, cfg.ProfileSeconds);
+            Equal(0, cfg.SpikeContributors);
+            Equal((int)Config.MaxSlowRowsPerMinuteMin, cfg.MaxSlowRowsPerMinute);
+            Equal(Config.OverheadBudgetPercentMax, cfg.OverheadBudgetPercent);
+            // Enabled, Profile, Watch and OutputFolder decide which patches exist, so ApplyTo must never touch them.
+            Equal(true, cfg.Enabled); Equal(Config.ProfileStandard, cfg.Profile); Equal(0, cfg.Watch.Count); Equal("", cfg.OutputFolder);
+        }
+
+        static void SettingsSeedFromTheCfgFile()
+        {
+            // .Value stays the C# default (0) until Mod Settings calls Load(), which needs a real ISettings/ModRepository; what this mod
+            // controls, and what Load() would seed .Value from the first time (no Mod Settings save file yet), is DefaultValue.
+            Config previous = Plugin.SetConfigForTest(new Config { SlowFrameMs = 77, SpikeContributors = 2 });
+            try
+            {
+                var owner = new PerformanceSettings(null, null, null);
+                Equal(77, owner.SlowFrameMs.DefaultValue, "the panel starts from what PerformanceLog.cfg already had, not the field default (50)");
+                Equal(2, owner.SpikeContributors.DefaultValue);
+            }
+            finally { Plugin.SetConfigForTest(previous); }
+
+            Plugin.SetConfigForTest(null);
+            try
+            {
+                var owner = new PerformanceSettings(null, null, null);
+                Equal((int)Config.SlowFrameMsDefault, owner.SlowFrameMs.DefaultValue, "no Config yet (StartMod has not run): the field default");
+            }
+            finally { Plugin.SetConfigForTest(previous); }
         }
 
         static void HarmonyInfo()

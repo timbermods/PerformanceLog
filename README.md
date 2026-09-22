@@ -4,10 +4,11 @@ A Timberborn 1.1 mod (built against **1.1.2.4**) that measures **where the game'
 person, or an AI assistant such as Claude, can read to find out why a game is slow. It is a diagnostic tool for finding performance problems in
 the game and in other mods. It does nothing else.
 
-Version **0.1.1** is a **preview**. Its automated checks run against the game's real assemblies, and version 0.1.0 has been played once (a 31 minute session with
-nine mods, ending in a normal exit): every patch applied and the recording was complete. That first recording also showed several defects, fixed in 0.1.1 and
-listed in [CHANGELOG.md](CHANGELOG.md); the fixes themselves have not been played yet. If a part fails to start it says so in the log and the summary, that part stays
-off, and the game carries on. Read [docs/TESTING.md](docs/TESTING.md) for what is and is not verified, and how to check it in a game in five minutes.
+Version **0.1.2** is a **preview**. Its automated checks run against the game's real assemblies, and version 0.1.0 has been played once (a 31 minute session with
+nine mods, ending in a normal exit): every patch applied and the recording was complete. That first recording also showed several defects, fixed in 0.1.1; 0.1.2
+adds an in-game settings page and has not itself been played yet. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version. If a part fails to start it
+says so in the log and the summary, that part stays off, and the game carries on. Read [docs/TESTING.md](docs/TESTING.md) for what is and is not verified, and
+how to check it in a game in five minutes.
 
 It only observes. It never records or replays an action, never uses the game's random numbers and never touches anything the simulation reads, so
 it should not cause a desync in co-op. (That has not been played in co-op yet.)
@@ -15,7 +16,7 @@ it should not cause a desync in co-op. (That has not been played in co-op yet.)
 ## Install
 
 1. Close Timberborn. Extract the release ZIP into `Documents\Timberborn\Mods`. It contains one `PerformanceLog` folder.
-2. It requires the **Harmony** mod (2.4.1 or newer) from the Steam Workshop.
+2. It requires the **Harmony** mod (2.4.1 or newer) and the **Mod Settings** mod (1.1.0.0 or newer) from the Steam Workshop.
 3. Launch Timberborn, enable **Performance Log** in the mod manager, and restart.
 4. Play. Leave normally (menu → exit) so the files are finished; if the game crashes the files are still readable and the summary is at most a
    minute stale. (From 0.1.1 you can also copy or zip the folder while the game runs; 0.1.0 held four of its files open, so a zip made then left them out.) Look for `[PerformanceLog]` lines in `Player.log`
@@ -63,21 +64,26 @@ Any method can also be timed by name (`Watch` in the config). See the file.
 
 ## Settings
 
-`PerformanceLog.cfg`, next to `manifest.json` in the mod's `version-1.1` folder. Restart the game after editing. The defaults are right for finding out why
-a game is slow. Nothing here changes what the game simulates, so co-op players may use different values.
+Six of the settings can be changed from Timberborn's **Mod Settings** menu, with no restart: they take effect from the next game or save you load.
+The rest — `Enabled`, `Profile`, `Watch` and `OutputFolder` — decide which parts of the game get patched, which is settled before that menu exists,
+so they live only in `PerformanceLog.cfg` (next to `manifest.json` in the mod's `version-1.1` folder) and need the game restarted after editing.
+Nothing here changes what the game simulates, so co-op players may use different values.
 
-| Setting | Default | What it does |
-|---|---|---|
-| `Enabled` | `true` | `false` = the mod does nothing at all (no patches, no files). |
-| `SlowFrameMs` | `50` | A frame this long gets its own row in `frames.csv`. |
-| `SummarySeconds` | `10` | How often a summary row is written. |
-| `ProfileSeconds` | `30` | How often `profile.csv` is written. |
-| `Profile` | `standard` | `off` (no patch on the entity tick at all), `standard` or `deep` (also samples every entity component). |
-| `OverheadBudgetPercent` | `0.5` | How much of a second the sampling may spend measuring; it widens the sampling on its own when there are many entities. |
-| `SpikeContributors` | `5` | How many of the biggest contributors to each slow frame are written to `spikes.csv`. |
-| `MaxSlowRowsPerMinute` | `300` | At most this many slow frames get a row a minute; the rest are only counted, so a game that is slow all the time cannot fill the disk. |
-| `OutputFolder` | *(empty)* | Where session folders go. Empty = `Documents\Timberborn\PerformanceLog`. |
-| `Watch` | *(none)* | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like. Rows appear in `profile.csv` as kind `method`. |
+| Setting | Default | Where | What it does |
+|---|---|---|---|
+| `Enabled` | `true` | .cfg only | `false` = the mod does nothing at all (no patches, no files). |
+| `SlowFrameMs` | `50` | .cfg or Mod Settings | A frame this long gets its own row in `frames.csv`. |
+| `SummarySeconds` | `10` | .cfg or Mod Settings | How often a summary row is written. |
+| `ProfileSeconds` | `30` | .cfg or Mod Settings | How often `profile.csv` is written. |
+| `Profile` | `standard` | .cfg only | `off` (no patch on the entity tick at all), `standard` or `deep` (also samples every entity component). |
+| `OverheadBudgetPercent` | `0.5` | .cfg or Mod Settings | How much of a second the sampling may spend measuring; it widens the sampling on its own when there are many entities. |
+| `SpikeContributors` | `5` | .cfg or Mod Settings | How many of the biggest contributors to each slow frame are written to `spikes.csv`. |
+| `MaxSlowRowsPerMinute` | `300` | .cfg or Mod Settings | At most this many slow frames get a row a minute; the rest are only counted, so a game that is slow all the time cannot fill the disk. |
+| `OutputFolder` | *(empty)* | .cfg only | Where session folders go. Empty = `Documents\Timberborn\PerformanceLog`. |
+| `Watch` | *(none)* | .cfg only | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like. Rows appear in `profile.csv` as kind `method`. |
+
+The first time you open the Mod Settings page it starts from whatever `PerformanceLog.cfg` already says; after that, whatever you set there is what
+is used, and editing that number in the file no longer does anything (Mod Settings remembers it, not this mod).
 
 To measure another mod's method, for example:
 
@@ -123,7 +129,7 @@ Install the .NET 8 SDK and Python 3, and have Timberborn (and the Harmony Worksh
 .\build.ps1 -GameDir 'C:\Program Files (x86)\Steam\steamapps\common\Timberborn'
 ```
 
-builds the mod, runs the checks, and creates `dist\PerformanceLog-0.1.1.zip`. `.\build.ps1 -Install` also copies it into your `Mods` folder. The checks alone:
+builds the mod, runs the checks, and creates `dist\PerformanceLog-0.1.2.zip`. `.\build.ps1 -Install` also copies it into your `Mods` folder. The checks alone:
 
 ```
 dotnet run --project tests -c Release

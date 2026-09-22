@@ -5,7 +5,7 @@
     <RootNamespace>PerformanceLog</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <!-- Report exactly the version above, without a +<commit> suffix. -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
@@ -13,15 +13,20 @@
     <GameDir Condition="'$(GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Timberborn</GameDir>
     <Managed>$(GameDir)\Timberborn_Data\Managed</Managed>
     <HarmonyPath Condition="'$(HarmonyPath)' == ''">C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3284904751\0Harmony.dll</HarmonyPath>
+    <ModSettingsPath Condition="'$(ModSettingsPath)' == ''">C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3283831040\version-1.1\Scripts\ModSettings.Core.dll</ModSettingsPath>
+    <ModSettingsCommonPath Condition="'$(ModSettingsCommonPath)' == ''">C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3283831040\version-1.1\Scripts\ModSettings.Common.dll</ModSettingsCommonPath>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="PerformanceLog.Tests" />
     <Reference Include="$(Managed)\Timberborn.*.dll" Private="false" />
     <Reference Include="$(Managed)\UnityEngine.dll" Private="false" />
     <Reference Include="$(Managed)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="$(Managed)\UnityEngine.TextRenderingModule.dll" Private="false" />
     <Reference Include="$(Managed)\Bindito.Core.dll" Private="false" />
     <Reference Include="$(Managed)\System.Collections.Immutable.dll" Private="false" />
     <Reference Include="$(HarmonyPath)" Private="false" />
+    <Reference Include="$(ModSettingsPath)" Private="false" />
+    <Reference Include="$(ModSettingsCommonPath)" Private="false" />
     <EmbeddedResource Include="..\docs\SESSION-README.md" LogicalName="SESSION-README.md" Condition="Exists('..\docs\SESSION-README.md')" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2 (preview, not yet played)
+
+An in-game settings page, hooked into the **Mod Settings** mod (now a required dependency, like Harmony).
+
+- `SlowFrameMs`, `SummarySeconds`, `ProfileSeconds`, `OverheadBudgetPercent`, `SpikeContributors` and `MaxSlowRowsPerMinute` can now be set from
+  Timberborn's Mod Settings menu, from the main menu or in a running game, and apply from the next game or save loaded — no restart.
+  `PerformanceLog.cfg` still works and seeds the menu's first value; once a setting is touched in the menu, the menu owns it.
+- `Enabled`, `Profile`, `Watch` and `OutputFolder` stay `PerformanceLog.cfg`-only: they decide which Harmony patches this mod makes, which is
+  settled in `Plugin.StartMod`, before Bindito (and so Mod Settings) exists, so putting them in the menu would mean either re-patching the game
+  live or always installing the entity-tick patch even when `Profile = off` asks not to — this release does neither. The menu's own note says so.
+- `source/Game/Settings.cs` is the only file that touches Mod Settings types (`PerformanceSettings`, a `ModSettingsOwner`), so the rest of the mod
+  does not depend on that assembly.
+
 ## 0.1.1 (preview)
 
 Fixes for what the first recording from a real game showed (Timberborn 1.1.2.4, Unity 6000.5.5f1, nine mods, 31 minutes, a normal exit). Everything below was found by reading

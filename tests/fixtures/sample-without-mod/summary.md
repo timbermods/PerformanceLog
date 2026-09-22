@@ -8,7 +8,7 @@ Session `sample-without-mod`, status **finished**. This file is rewritten about 
 |---|---|
 | Started | 2026-01-01 12:00:00 |
 | Recorded | 300 s (5.0 min), 17905 frames, 2441 simulation ticks |
-| Game / mod | Timberborn 1.1.2.4 (sample) / Performance Log 0.1.1 |
+| Game / mod | Timberborn 1.1.2.4 (sample) / Performance Log 0.1.2 |
 | Profile level | standard (slow frame = 50 ms or more; summary rows every 10 s) |
 | Colony at the last sample | 240 beavers, 12 bots, 9000 entities, day 20 |
 | Mods enabled | 2 (listed at the end) |
@@ -166,7 +166,7 @@ A source that says it produced nothing leaves its columns at 0; do not read a 0 
 | Id | Name | Version |
 |---|---|---|
 | Harmony | Harmony | v2.4.1 |
-| kyler.performancelog | Performance Log | v0.1.1 |
+| kyler.performancelog | Performance Log | v0.1.2 |
 
 Which mod patches which hot method of the game is in the header of `frames.csv` (`# patch|` lines).
 

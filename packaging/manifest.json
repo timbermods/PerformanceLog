@@ -1,8 +1,11 @@
 {
   "Name": "Performance Log",
-  "Version": "0.1.1",
+  "Version": "0.1.2",
   "Id": "kyler.performancelog",
   "MinimumGameVersion": "1.1.2.4",
-  "Description": "Preview. Measures where Timberborn's time and memory go and writes it, session by session, to Documents/Timberborn/PerformanceLog: frame times and where each frame went, the cost of every singleton, kind of entity and mod, garbage collection, saves and loading, with a readme and summary that a person or an AI assistant can use to diagnose slowness. It only observes: it never changes what the game simulates, so it is safe in multiplayer.",
-  "RequiredMods": [{ "Id": "Harmony", "MinimumVersion": "2.4.1" }]
+  "Description": "Preview. Measures where Timberborn's time and memory go and writes it, session by session, to Documents/Timberborn/PerformanceLog: frame times and where each frame went, the cost of every singleton, kind of entity and mod, garbage collection, saves and loading, with a readme and summary that a person or an AI assistant can use to diagnose slowness. It only observes: it never changes what the game simulates, so it is safe in multiplayer. Slow-frame threshold, window sizes and row limits can be set from the Mod Settings menu.",
+  "RequiredMods": [
+    { "Id": "Harmony", "MinimumVersion": "2.4.1" },
+    { "Id": "eMka.ModSettings", "MinimumVersion": "1.1.0.0" }
+  ]
 }

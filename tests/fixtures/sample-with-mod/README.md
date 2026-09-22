@@ -1,6 +1,6 @@
 # Timberborn performance log: how to read this folder
 
-This folder is one recording of one Timberborn session, made by the **Performance Log** mod (version 0.1.1). It holds measurements
+This folder is one recording of one Timberborn session, made by the **Performance Log** mod (version 0.1.2). It holds measurements
 only. The mod never changes what the game simulates, so a recording shows the game as it was with the mods that were enabled.
 
 **If you are a Claude chat asked to find out why this session was slow: read `summary.md` first, then this file's "Diagnosing"

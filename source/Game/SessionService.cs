@@ -20,9 +20,10 @@ namespace PerformanceLog
         readonly PopulationService populationService;
         readonly IDayNightCycle dayNightCycle;
         readonly ITickService tickService;
+        readonly PerformanceSettings settings;
 
         public SessionService(ModRepository modRepository, SpeedManager speedManager, EntityRegistry entityRegistry,
-            PopulationService populationService, IDayNightCycle dayNightCycle, ITickService tickService)
+            PopulationService populationService, IDayNightCycle dayNightCycle, ITickService tickService, PerformanceSettings settings)
         {
             this.modRepository = modRepository;
             this.speedManager = speedManager;
@@ -30,6 +31,7 @@ namespace PerformanceLog
             this.populationService = populationService;
             this.dayNightCycle = dayNightCycle;
             this.tickService = tickService;
+            this.settings = settings;
         }
 
         public void PostLoad()
@@ -37,6 +39,9 @@ namespace PerformanceLog
             Milestones.Mark("post-load");
             try
             {
+                // The six numbers the in-game settings panel controls (Settings.cs); Enabled/Profile/Watch/OutputFolder came from
+                // PerformanceLog.cfg already, at StartMod, and are untouched here.
+                settings?.ApplyTo(Plugin.Config);
                 Session.Start(Plugin.Config, new SessionServices
                 {
                     Mods = modRepository,

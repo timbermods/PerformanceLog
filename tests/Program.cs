@@ -19,6 +19,8 @@ namespace PerformanceLog.Tests
     internal static class Program
     {
         static string managed = @"C:\Program Files (x86)\Steam\steamapps\common\Timberborn\Timberborn_Data\Managed";
+        // Where the Mod Settings mod's assemblies live (Settings.cs references ModSettings.Core and ModSettings.Common).
+        const string modSettingsDirectory = @"C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3283831040\version-1.1\Scripts";
 
         static int Main(string[] args)
         {
@@ -26,8 +28,12 @@ namespace PerformanceLog.Tests
             if (managedAt >= 0 && managedAt + 1 < args.Length) managed = args[managedAt + 1];
             AppDomain.CurrentDomain.AssemblyResolve += (_, e) =>
             {
-                string path = Path.Combine(managed, new AssemblyName(e.Name).Name + ".dll");
-                return File.Exists(path) ? Assembly.LoadFrom(path) : null;
+                foreach (string directory in new[] { managed, modSettingsDirectory })
+                {
+                    string path = Path.Combine(directory, new AssemblyName(e.Name).Name + ".dll");
+                    if (File.Exists(path)) return Assembly.LoadFrom(path);
+                }
+                return null;
             };
             return Run(args);
         }

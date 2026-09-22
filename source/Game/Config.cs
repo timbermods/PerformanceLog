@@ -14,14 +14,24 @@ namespace PerformanceLog
         /// <summary>off: do nothing at all. standard: frame, tick and singleton timing, and a sampled profile of entity kinds. deep: also every entity component.</summary>
         public const string ProfileOff = "off", ProfileStandard = "standard", ProfileDeep = "deep";
 
+        // Defaults and valid ranges for the numeric settings, named so PerformanceLog.cfg's own clamp (Apply, below) and the in-game
+        // settings panel (Settings.cs) always agree; a slider there uses exactly these bounds, never a narrower "nicer" one.
+        public const double SlowFrameMsDefault = 50, SlowFrameMsMin = 1, SlowFrameMsMax = 5000;
+        public const double SummarySecondsDefault = 10, SummarySecondsMin = 1, SummarySecondsMax = 600;
+        public const double ProfileSecondsDefault = 30, ProfileSecondsMin = 5, ProfileSecondsMax = 1800;
+        public const double OverheadBudgetPercentDefault = 0.5, OverheadBudgetPercentMin = 0.05, OverheadBudgetPercentMax = 5;
+        public const int SpikeContributorsDefault = 5;
+        public const int MaxSlowRowsPerMinuteDefault = 300, MaxSlowRowsPerMinuteMin = 10, MaxSlowRowsPerMinuteMax = 6000;
+        // SpikeContributors' upper bound is PerformanceLog.Profile.TopK (8), read live below so the two can never drift apart.
+
         public bool Enabled = true;
-        public double SlowFrameMs = 50;
-        public double SummarySeconds = 10;
-        public double ProfileSeconds = 30;
+        public double SlowFrameMs = SlowFrameMsDefault;
+        public double SummarySeconds = SummarySecondsDefault;
+        public double ProfileSeconds = ProfileSecondsDefault;
         public string Profile = ProfileStandard;
-        public double OverheadBudgetPercent = 0.5;
-        public int SpikeContributors = 5;
-        public int MaxSlowRowsPerMinute = 300;
+        public double OverheadBudgetPercent = OverheadBudgetPercentDefault;
+        public int SpikeContributors = SpikeContributorsDefault;
+        public int MaxSlowRowsPerMinute = MaxSlowRowsPerMinuteDefault;
         public string OutputFolder = "";
         public readonly List<string> Watch = new List<string>();
 
@@ -75,12 +85,12 @@ namespace PerformanceLog
                 switch (key.ToLowerInvariant())
                 {
                     case "enabled": Enabled = Bool(key, value, Enabled); break;
-                    case "slowframems": SlowFrameMs = Clamp(Number(key, value, SlowFrameMs), 1, 5000); break;
-                    case "summaryseconds": SummarySeconds = Clamp(Number(key, value, SummarySeconds), 1, 600); break;
-                    case "profileseconds": ProfileSeconds = Clamp(Number(key, value, ProfileSeconds), 5, 1800); break;
-                    case "overheadbudgetpercent": OverheadBudgetPercent = Clamp(Number(key, value, OverheadBudgetPercent), 0.05, 5); break;
+                    case "slowframems": SlowFrameMs = Clamp(Number(key, value, SlowFrameMs), SlowFrameMsMin, SlowFrameMsMax); break;
+                    case "summaryseconds": SummarySeconds = Clamp(Number(key, value, SummarySeconds), SummarySecondsMin, SummarySecondsMax); break;
+                    case "profileseconds": ProfileSeconds = Clamp(Number(key, value, ProfileSeconds), ProfileSecondsMin, ProfileSecondsMax); break;
+                    case "overheadbudgetpercent": OverheadBudgetPercent = Clamp(Number(key, value, OverheadBudgetPercent), OverheadBudgetPercentMin, OverheadBudgetPercentMax); break;
                     case "spikecontributors": SpikeContributors = (int)Clamp(Number(key, value, SpikeContributors), 0, PerformanceLog.Profile.TopK); break;
-                    case "maxslowrowsperminute": MaxSlowRowsPerMinute = (int)Clamp(Number(key, value, MaxSlowRowsPerMinute), 10, 6000); break;
+                    case "maxslowrowsperminute": MaxSlowRowsPerMinute = (int)Clamp(Number(key, value, MaxSlowRowsPerMinute), MaxSlowRowsPerMinuteMin, MaxSlowRowsPerMinuteMax); break;
                     case "outputfolder": OutputFolder = value; break;
                     case "profile":
                         string level = value.ToLowerInvariant();
@@ -117,7 +127,8 @@ namespace PerformanceLog
             return fallback;
         }
 
-        static double Clamp(double value, double low, double high) => value < low ? low : value > high ? high : value;
+        /// <summary>Public so the in-game settings panel (Settings.cs) clamps its own values the same way. Also used by Apply, above.</summary>
+        public static double Clamp(double value, double low, double high) => value < low ? low : value > high ? high : value;
 
         public override string ToString() =>
             "Enabled=" + Enabled + ", Profile=" + Profile + ", SlowFrameMs=" + SlowFrameMs.ToString(CultureInfo.InvariantCulture) +

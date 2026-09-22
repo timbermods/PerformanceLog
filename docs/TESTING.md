@@ -1,10 +1,11 @@
 # What has been checked, and how to check the rest in a game
 
-Version 0.1.0 was run in a game once (the first recording, below); 0.1.1 fixes what that showed and has been tested without the game running. This is the honest list.
+Version 0.1.0 was run in a game once (the first recording, below); 0.1.1 fixed what that showed, and 0.1.2 adds an in-game settings page. Neither 0.1.1
+nor 0.1.2 has been tested with the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (89 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (44 checks).
+`dotnet run --project tests -c Release` (91 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (44 checks).
 
 | What | How |
 |---|---|
@@ -23,6 +24,7 @@ Version 0.1.0 was run in a game once (the first recording, below); 0.1.1 fixes w
 | Profile = off leaves the entity tick unpatched; an abandoned save does not block the next; the parallel tick figure is not counted twice; slow-frame rows are limited per minute; the summary is made on the writer thread | `GameBindingTests`, `CoreTests`, `WriterTests` |
 | The config file, the watch list resolution against the real game types | `GameBindingTests` |
 | The analysis tool reads what the mod writes (fixtures come from the real writer) and each finding fires on its situation and not on a healthy one | `tools/test_perflog.py`, `WriterTests.FixturesAreCurrent` |
+| The in-game settings panel's values are clamped onto a `Config` the same way `PerformanceLog.cfg` is, only the six settings that can be, and the panel starts from what the .cfg file already had | `GameBindingTests.SettingsApplyTo`, `SettingsSeedFromTheCfgFile` |
 
 An independent read-only review of the game-facing code (looking for anything that could break the game or give wrong data, checked against the game's decompiled code and BeaverBuddies) found no
 crash or hang; what it did find (wrappers put in at `Load` time could hide singleton types from BeaverBuddies' reordering, the previous game kept alive in the menu, BeaverBuddies' deferred save read as 0 ms,
@@ -67,23 +69,30 @@ heap and is coarse**. The per-singleton `KB/s` figures are therefore only good i
    a mod whose DLL is not in its own folder may still read as unknown.
 6. **The report's advice on a bad recording.** The first recording was mostly paused and in the background, so the findings for real problems (a slow simulation, a saving hitch, a memory leak,
    a mod that costs too much) have been exercised on made-up sessions and one real, healthy one.
+7. **The in-game settings page (0.1.2, entirely unplayed)**: that Mod Settings actually shows it, that `RangeIntModSetting` renders as something usable and
+   the readonly note as readable text, and that `PerformanceSettings.Load()` does not throw against the real `ISettings`/`ModRepository`/`ModSettingsOwnerRegistry`
+   (only checked against `null`s standing in for them, which never calls `Load()`; see `Settings.cs`'s own notes). Then that a value changed there actually
+   reaches `Session.Start` — change `SlowFrameMs`, load a save, and check `frames.csv`'s `# thresholdMs` header line against what was set.
 
 ## Five-minute check in a game
 
-1. Install (README), enable, start a game from a save, play **3 minutes with the game in front**, including a while at speed 3, then leave through the menu.
-2. Open `Documents\Timberborn\PerformanceLog\<newest folder>`. There should be `summary.md`, `frames.csv`, `profile.csv`, `spikes.csv`, `events.csv`, `README.md` and `columns.md`.
-3. In `Player.log`, search for `[PerformanceLog]`. Expect `Patches: N installed, 0 could not be made.` and `Recording to ...` and `Finished: ...`. Any warning names the part that is off.
-4. Open `summary.md`. The **"Read first"** list at the top (if any) says what did not work. Then check:
+1. Install (README, now including the **Mod Settings** mod), enable, open Mod Settings from the main menu and confirm **Performance Log** is listed with
+   its six sliders and the readonly note. Change `SlowFrameMs` to something distinctive, e.g. 77.
+2. Start a game from a save, play **3 minutes with the game in front**, including a while at speed 3, then leave through the menu.
+3. Open `Documents\Timberborn\PerformanceLog\<newest folder>`. There should be `summary.md`, `frames.csv`, `profile.csv`, `spikes.csv`, `events.csv`, `README.md` and `columns.md`.
+4. In `Player.log`, search for `[PerformanceLog]`. Expect `Patches: N installed, 0 could not be made.` and `Recording to ...` and `Finished: ...`. Any warning names the part that is off.
+5. Open `summary.md`. The **"Read first"** list at the top (if any) says what did not work. Then check:
    - **Where an average frame goes** has non-zero `tickMs`/`entMs`/`updMs` and the parts add up (`otherMs` is the remainder).
    - **Simulation ticks** says a plausible number of ticks per second (about 3.3 at speed 1 if the tick is 0.3 s).
    - **Where the time goes** lists singletons with their mods (the game's own show as `game`; a mod you have enabled should show under its id).
    - The **mod list** matches what you enabled.
-5. In the `frames.csv` header: every `# capability|patch|...` line says `installed`; the `# capability-final|patchCalls|...` lines at the end say non-zero counts, and none says `never ran`.
+6. In the `frames.csv` header: `# thresholdMs: 77` (the value set in step 1, proving the settings page reached the session). Every `# capability|patch|...`
+   line says `installed`; the `# capability-final|patchCalls|...` lines at the end say non-zero counts, and none says `never ran`.
    `singleton wrappers put in place` should be a handful (one or two per array). `# capability|workingSet|...` should say `from Windows`.
    `# capability-final|profilerRecorder|...` and `frameTiming` may legitimately say `never produced a value` in a release build.
-6. Compare the frame rate the game shows with `summary.md`'s mean; they should agree.
-7. Run `python tools/perflog.py report <folder>` and confirm it reads the folder without complaint.
-8. To see the cost, play the same save for the same time at the same speed with the mod turned off in the mod manager and compare the frame rate with something outside the mod (Steam's
+7. Compare the frame rate the game shows with `summary.md`'s mean; they should agree.
+8. Run `python tools/perflog.py report <folder>` and confirm it reads the folder without complaint.
+9. To see the cost, play the same save for the same time at the same speed with the mod turned off in the mod manager and compare the frame rate with something outside the mod (Steam's
    or the game's own FPS counter). The mod should cost under 1-2% of a frame. (With `Enabled = false` the mod writes no session at all, so there is nothing to `compare`.)
    `overheadUs` and `probeUs` in the log are the mod's own estimate of what it costs; the report warns if they are more than 2% of a frame.
 

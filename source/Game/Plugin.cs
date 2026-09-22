@@ -20,6 +20,14 @@ namespace PerformanceLog
         internal static Config Config { get; private set; }
         internal static bool Started { get; private set; }
 
+        /// <summary>Test-only: lets a check set what StartMod would have set, without actually starting the mod. Returns the previous value.</summary>
+        internal static Config SetConfigForTest(Config config)
+        {
+            Config previous = Config;
+            Config = config;
+            return previous;
+        }
+
         static string ReadVersion()
         {
             try

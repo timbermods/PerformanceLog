@@ -35,6 +35,7 @@ source/Game/     The Timberborn side (needs the game's assemblies to compile).
   Instrumentation.cs   The Harmony patch list (CreateSpecs) and every patch body. Wrappers.cs: timing wrappers put into the game's singleton arrays, LoadRecorder, SaveTracker.
   Watch.cs       Config-driven method timing. PlayerLoopTiming.cs: Unity phase markers and the frame boundary. UnityExtras.cs: profiler counters, frame timing.
   Environment.cs Computer/game facts, mod list, assembly-to-mod map, Harmony patch reader. Config.cs: PerformanceLog.cfg.
+  Settings.cs    The in-game settings page (the Mod Settings mod). The only file that touches ModSettings.Core/.Common types.
 tests/           .NET 8 console checks (no test framework). Core checks run for real; game checks run against the installed game's real assemblies.
 tests/fixtures/  Sample sessions written by the real mod code (tests/SampleSession.cs). tools/ reads them. Regenerate after changing any column (see below).
 tools/perflog.py Analysis: report / compare / list. Standard library only. tools/test_perflog.py: its tests.
@@ -93,6 +94,13 @@ To read the game's own code (the way every patch target here was checked): `ilsp
 - **Sampling uses random gaps** (mean N), not every Nth call: the game calls singletons in the same order every frame, and a fixed stride can land on the same few of them forever
   (`ProfileTests.NoAliasing`).
 - **`Columns` is initialised in textual order** (C# static field initialisers). Declare arrays before the groups that use them.
+- **Only some settings can live in the in-game Mod Settings menu** (`Settings.cs`, `PerformanceSettings`). `Plugin.StartMod` reads `PerformanceLog.cfg`
+  and decides `Enabled`/`Profile`/`Watch` (which Harmony patches get made, including whether the entity tick is patched at all) before Bindito, and so
+  Mod Settings, exists; making those live would mean re-patching the game while it runs or always paying for the entity-tick patch even when `Profile = off`
+  asks not to. Only the six numbers `Session.Start` reads fresh each session (`SlowFrameMs`, `SummarySeconds`, `ProfileSeconds`, `OverheadBudgetPercent`,
+  `SpikeContributors`, `MaxSlowRowsPerMinute`) are in the menu; `SessionService.PostLoad` calls `PerformanceSettings.ApplyTo` to fold them onto `Plugin.Config`
+  before each `Session.Start`. A `ModSetting<T>`'s `.Value` is `default(T)` until Mod Settings calls `Load()` (which needs a real `ISettings`/`ModRepository`);
+  what this mod controls at construction, and what `Load()` seeds `.Value` from the first time, is `.DefaultValue` — tests read that, not `.Value`.
 - Colony and memory columns are read only when a row is written and carried over otherwise (`lastHeavy` in `Probe`).
 - The tests run each check on a thread-pool thread, and `Probe` is static and remembers the game thread's id: every check that uses it goes through `Rig` in `CoreTests.cs`.
 
