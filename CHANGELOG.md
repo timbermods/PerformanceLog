@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.3 (preview, not yet played)
+## 0.1.3 (preview)
 
 **The defaults now capture the most detail a session can hold without anyone touching a setting**, so every recording made from a plain
 install is as informative as this mod can make it.
@@ -17,7 +17,8 @@ install is as informative as this mod can make it.
   rather than the depth of any one row, and the budget system above already throttles itself if measuring gets expensive, so there was no
   clear "more detail" case for moving them, only a "more rows" one.
 - Expect a real, measurable increase in the mod's own cost from this alone — deep's component sampling plus double the sampling budget.
-  Nobody has played it yet; the five-minute check in `docs/TESTING.md` now starts by checking `overheadUs` is still reasonable.
+  Nobody had played it when it was released (it has been since: see `docs/TESTING.md`); step 10 of the five-minute check there measures
+  what it costs.
 
 ## 0.1.2 (preview, not yet played)
 
@@ -43,7 +44,7 @@ that recording. Each one that can be checked outside the game has a check that f
   figures and the garbage-collection section**; `tools/perflog.py` says so.
 - **Files are no longer held open.** 0.1.0 kept `frames.csv`, `profile.csv`, `spikes.csv` and `events.csv` open for writing, so zipping or copying the folder while the game ran silently left them
   out (and a folder listing showed size 0). They are now opened, appended to and closed on each write, shared with readers, and retried if someone else holds them.
-- **Every singleton of the game itself was labelled with no mod ("(unknown)")**; the mod map was installed without the game's own assemblies. They are now `game`. The analysis tool applies the same
+- **Every singleton of the game itself was labeled with no mod ("(unknown)")**; the mod map was installed without the game's own assemblies. They are now `game`. The analysis tool applies the same
   rule to older recordings.
 - **`workingMB` was always 0** (Unity's Mono reports 0 for the process's memory). It now asks Windows, and the header says where the figure comes from (`# capability|workingSet|...`).
 - **Loading steps now record how much the managed heap grew** during each one (`allocKB` of the load rows, "heap grew MB" in `summary.md`, and a finding in the report). The first recording's
