@@ -787,6 +787,22 @@ class FindingTests(unittest.TestCase):
         self.assertIn("allocated about 100 KB per second", text, "an exact counter does not fall at a collection")
         self.assertNotIn("not measured in", text)
 
+    def test_heap_mode_counts_are_scoped_and_a_lost_frames_growth_is_left_out(self):
+        heap = "GC.GetTotalMemory(false) (coarse: grows with allocation, falls at a garbage collection)"
+        s = Synthetic()
+        s.pipes.append(["capability", "allocSource", heap])
+        for i in range(7):
+            if i == 1:
+                s.slow_frame(3000.0, gcDelta=1.0, allocKB=-50000.0, paused=1.0)    # in a paused window, which the steady state leaves out
+            if i == 4:
+                s.slow_frame(5000.0, gcDelta=1.0, allocKB=500.0)                   # a collection that freed less than the frame allocated
+            s.window(allocKB=1000.0, paused=10 * 1000.0 / 16.7 if i == 1 else 0.0)
+        text = self.report(s)
+        section = text.split("7. GARBAGE COLLECTION")[1].split("8. WHAT EACH SOURCE")[0]
+        self.assertIn("allocated about 100 KB per second", section, "(6000 - 500) KB over the 55 s whose allocation was measured")
+        self.assertIn("at least 2 frames in the whole session", section, "the count says it is the whole session's")
+        self.assertIn("leaves out the 1 slow frame (5.0 s) of them in these windows", section, "and how many of them are in the windows the figures cover")
+
     def test_hitches_on_a_rhythm_are_matched_to_the_autosave(self):
         s = Synthetic()
         for i in range(12):

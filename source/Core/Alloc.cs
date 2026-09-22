@@ -7,8 +7,8 @@ namespace PerformanceLog
     /// <summary>
     /// How many bytes this program has allocated, as cheaply as the runtime allows. Differences of it say which sections allocate.
     /// Unity's Mono may or may not have a per-thread counter, so it is tried, checked against a known allocation, and otherwise the
-    /// size of the managed heap is used (which only moves when the heap takes new blocks, so individual readings are coarse and only
-    /// sums over many readings mean anything).
+    /// size of the managed heap is used (which grows only when the heap takes new blocks and falls at a garbage collection, so individual
+    /// readings are coarse, a frame with a collection loses what it allocated, and only sums over many readings mean anything).
     /// </summary>
     public static class Alloc
     {
@@ -18,7 +18,7 @@ namespace PerformanceLog
         public static int Mode { get; private set; }
 
         public static string ModeName => Mode == ModeThread ? "GC.GetAllocatedBytesForCurrentThread (exact)" :
-                                         Mode == ModeHeap ? "GC.GetTotalMemory(false) (coarse: moves only when the heap grows)" : "none";
+                                         Mode == ModeHeap ? "GC.GetTotalMemory(false) (coarse: grows with allocation, falls at a garbage collection)" : "none";
 
         /// <summary>Why the exact counter was not used, when it was tried and rejected. Empty otherwise. For the header.</summary>
         public static string Note { get; private set; } = "";

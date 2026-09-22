@@ -274,14 +274,15 @@ def heap_alloc(session):
 
 
 def alloc_unmeasured(session, rows):
-    """The slow frames inside the summary rows `rows` whose allocation was not measured, and their milliseconds. With the heap size as the
-    counter a frame with a collection loses what it allocated; its row has gcDelta > 0 or (the heap shrank) a negative allocKB. That holds for
-    recordings of every version. Frames too short to have a row of their own are not known here; they are short."""
+    """The slow frames inside the summary rows `rows` whose allocation was not measured: how many, their milliseconds, and the heap growth
+    they still showed (their positive allocKB, which the rows' allocKB totals hold). With the heap size as the counter a frame with a
+    collection loses what it allocated; its row has gcDelta > 0 or (the heap shrank) a negative allocKB. That holds for recordings of every
+    version. Frames too short to have a row of their own are not known here; they are short."""
     if not heap_alloc(session) or not rows:
-        return 0, 0.0
+        return 0, 0.0, 0.0
     ordered = sorted(rows, key=lambda r: r["frame"])
     ends = [r["frame"] for r in ordered]
-    count, ms = 0, 0.0
+    count, ms, kb = 0, 0.0, 0.0
     for f in session.slow:
         if f["gcDelta"] <= 0 and f["allocKB"] >= 0:
             continue
@@ -289,7 +290,8 @@ def alloc_unmeasured(session, rows):
         if i < len(ends) and ordered[i]["frame"] - ordered[i]["frames"] < f["frame"]:
             count += 1
             ms += f["frameMs"]
-    return count, ms
+            kb += max(0.0, f["allocKB"])
+    return count, ms, kb
 
 
 def alloc_seconds(session, rows):
@@ -298,14 +300,16 @@ def alloc_seconds(session, rows):
 
 
 def alloc_rate(session, rows):
-    """KB allocated per second over the rows (allocKB, the heap growth), leaving out the frames whose allocation was not measured."""
+    """KB allocated per second over the rows (allocKB, the heap growth), leaving out the frames whose allocation was not measured: both their
+    time and what growth they still showed, since a collection took away an unknown part of what they allocated."""
     secs = alloc_seconds(session, rows)
-    return total(rows, "allocKB") / secs if secs > 0 else 0.0
+    return max(0.0, total(rows, "allocKB") - alloc_unmeasured(session, rows)[2]) / secs if secs > 0 else 0.0
 
 
 def alloc_unmeasured_note(session, rows):
-    """What the report says about frames whose allocation was not measured (heap-size counter), or None. The mod counts them in its
-    '# capability-final|allocSource|' line; a recording made before it did has only its slow rows to go on."""
+    """What the report says about frames whose allocation was not measured (heap-size counter), or None. The mod counts them over the whole
+    session in its '# capability-final|allocSource|' line; a recording made before it did has only its slow rows to go on. Either way the
+    figures above cover only the rows `rows`, so the note also says how many of the frames are in them."""
     if not heap_alloc(session):
         return None
     counted = None
@@ -318,12 +322,15 @@ def alloc_unmeasured_note(session, rows):
         counted = sum(1 for f in session.slow if f["gcDelta"] > 0 or f["allocKB"] < 0)
         if not counted:
             return None
-        source = " (this recording does not count them, so this is its slow rows with a collection)"
+        source = " (this recording does not count them, so these are its slow rows with a collection)"
         frames = "at least %d frame%s" % (counted, "" if counted == 1 else "s")
     else:
         frames = "%d frame%s" % (counted, "" if counted == 1 else "s")
-    return ("allocation not measured in %s with a collection%s: the heap-size counter falls at one, so what was allocated in them is lost. "
-            "The per-second figure leaves out the %.1f s of those that have a row in these windows." % (frames, source, alloc_unmeasured(session, rows)[1] / 1000.0))
+    inside, inside_ms, _ = alloc_unmeasured(session, rows)
+    scope = ("The per-second figure leaves out the %d slow frame%s (%.1f s) of them in these windows." % (inside, "" if inside == 1 else "s", inside_ms / 1000.0)
+             if inside else "None of the slow ones is in these windows.")
+    return ("allocation not measured in %s in the whole session, each with a collection%s: the heap-size counter falls at one, so what was "
+            "allocated in them is lost. %s" % (frames, source, scope))
 
 
 def phases_measured(session, rows):

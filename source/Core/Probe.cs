@@ -61,6 +61,11 @@ namespace PerformanceLog
         /// </summary>
         public long AllocUnmeasuredFrames;
         public double AllocUnmeasuredMs;
+        /// <summary>
+        /// The heap growth those frames still showed (their positive <c>allocKB</c>, which the session's <c>allocKB</c> total holds). A collection
+        /// took an unknown part of what they allocated, so an allocation rate leaves this out along with their time.
+        /// </summary>
+        public double AllocUnmeasuredKB;
 
         /// <summary>A copy that another thread can read while the game thread goes on counting.</summary>
         public SessionStats Clone()
@@ -508,7 +513,8 @@ namespace PerformanceLog
             // What was allocated outside every measured section, from the same counter the sections use. Only the exact per-thread counter never
             // goes down; the heap size (Alloc.ModeHeap, what the game's Mono offers) falls at a collection, and a frame with one has lost what it
             // allocated, so its KB columns read low (0 when the heap shrank). No column says so: the frame is counted instead (SessionStats.
-            // AllocUnmeasuredFrames, and the capability-final line from AllocFinalLine), and its row is the one with gcDelta > 0 or a negative allocKB.
+            // AllocUnmeasuredFrames, and the capability-final line from AllocFinalLine), and if it is slow its F row is one with gcDelta > 0 or a
+            // negative allocKB.
             long allocSource = Alloc.Enabled ? Alloc.Read() : 0;
             bool allocUnmeasured = Alloc.Enabled && (frameAllocFell || allocSource < lastAllocSource || (Alloc.Mode == Alloc.ModeHeap && gc != lastGc));
             r[Columns.OtherKB] = Math.Max(0, (allocSource - lastAllocSource) / 1024.0 - allocAccounted);
@@ -548,7 +554,7 @@ namespace PerformanceLog
             if (sessionFrames == 0 || heapMb < s.HeapMinMB) s.HeapMinMB = heapMb;
             if (heapMb > s.HeapMaxMB) s.HeapMaxMB = heapMb;
             if (sessionFrames == 0) s.FirstFrameMs = frameMs;
-            if (allocUnmeasured) { s.AllocUnmeasuredFrames++; s.AllocUnmeasuredMs += frameMs; }
+            if (allocUnmeasured) { s.AllocUnmeasuredFrames++; s.AllocUnmeasuredMs += frameMs; s.AllocUnmeasuredKB += Math.Max(0, allocKb); }
             if (slow)
             {
                 s.SlowFrames++; s.SlowMs += frameMs;
@@ -723,7 +729,7 @@ namespace PerformanceLog
                            (stats.AllocUnmeasuredMs / 1000).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " s)";
             if (!heap) return head + "exact|" + count + ": the counter fell during them, so their KB columns read low";
             return head + "heap size|" + count + " with a garbage collection: the heap-size counter falls at one, so what they allocated is lost and their KB " +
-                   "columns read low. In frames.csv they are the rows with gcDelta above 0 or a negative allocKB.";
+                   "columns read low. In frames.csv the slow ones are the F rows with gcDelta above 0 or a negative allocKB.";
         }
 
         static double UnixMs()

@@ -6,7 +6,7 @@ the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (96 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (55 checks).
+`dotnet run --project tests -c Release` (96 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (56 checks).
 
 | What | How |
 |---|---|
@@ -107,5 +107,9 @@ heap and is coarse**. The per-singleton `KB/s` figures are therefore only good i
     or the game's own FPS counter). At the new, deeper defaults the mod costs more than the 0.3-0.8% of a frame the first recording measured at the old ones; the report still warns if
     `overheadUs` + `probeUs` are more than 2% of a frame, and `OverheadBudgetPercent` is the setting to lower if it runs that high. (With `Enabled = false` the mod writes no session at
     all, so there is nothing to `compare`.)
+11. Not yet seen in a game, only in the automated checks with a stand-in counter: the last lines of `frames.csv` should include
+    `# capability-final|allocSource|heap size|...`, saying either `measured in every frame` or `allocation not measured in N frames (X s) with a garbage
+    collection`, where N is at least the number of `F` rows with `gcDelta` above 0 (a save usually brings a collection). `summary.md`'s garbage-collection
+    section should give the same N. In `summary.md`, the parts of **How `otherMs` splits by Unity phase** should add up to `otherMs` within about 0.1 ms.
 
 If something is wrong, send Claude the session folder and the `[PerformanceLog]` lines from `Player.log`.
