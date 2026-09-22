@@ -662,6 +662,7 @@ namespace PerformanceLog.Tests
             Equal(true, config.Enabled); Equal(Config.ProfileDeep, config.Profile); Equal(50.0, config.SlowFrameMs);
             Equal(PerformanceLog.Profile.TopK, config.SpikeContributors); Equal(1.0, config.OverheadBudgetPercent);
             Check(config.Deep && config.SamplesEntities, "deep by default");
+            Equal(false, config.AutoWatch, "the auto watch adds per-call patches on other mods' code, so it is asked for, not on by default");
             config.Apply(Config.Parse(new[]
             {
                 "# a comment",
@@ -670,6 +671,7 @@ namespace PerformanceLog.Tests
                 "OverheadBudgetPercent = 1", "OutputFolder = D:\\logs", "MaxSlowRowsPerMinute = 5",
                 "Watch = A.B.C; D.E.F",
                 "Watch = G.H.I",
+                "AutoWatch = true",
                 "no equals sign", "=novalue",
             }));
             Equal(33.5, config.SlowFrameMs);
@@ -682,6 +684,8 @@ namespace PerformanceLog.Tests
             Equal("D:\\logs", config.OutputFolder);
             Equal(10, config.MaxSlowRowsPerMinute);   // clamped up
             Check(config.Watch.SequenceEqual(new[] { "A.B.C", "D.E.F", "G.H.I" }), "Watch may repeat and use ;");
+            Equal(true, config.AutoWatch);
+            Check(config.ToString().Contains("AutoWatch=True"), "the header's config line says whether the auto watch was on: " + config);
             Equal(0, config.Problems.Count);
             var off = new Config();
             off.Apply(Config.Parse(new[] { "Profile=off" }));
@@ -691,9 +695,10 @@ namespace PerformanceLog.Tests
         static void ConfigProblems()
         {
             var config = new Config();
-            config.Apply(Config.Parse(new[] { "Enabled = maybe", "SlowFrameMs = fast", "Profile = extreme", "Surprise = 1" }));
-            Equal(true, config.Enabled); Equal(50.0, config.SlowFrameMs); Equal(Config.ProfileDeep, config.Profile);
-            Equal(4, config.Problems.Count);
+            config.Apply(Config.Parse(new[] { "Enabled = maybe", "SlowFrameMs = fast", "Profile = extreme", "Surprise = 1", "AutoWatch = sometimes" }));
+            Equal(true, config.Enabled); Equal(50.0, config.SlowFrameMs); Equal(Config.ProfileDeep, config.Profile); Equal(false, config.AutoWatch);
+            Equal(5, config.Problems.Count);
+            Check(config.Problems.Any(p => p.Contains("AutoWatch = sometimes")), string.Join("; ", config.Problems));
             Check(config.Problems.Any(p => p.Contains("Enabled")) && config.Problems.Any(p => p.Contains("unknown setting Surprise")));
             var many = new Config();
             many.Apply(Config.Parse(new[] { "Watch = " + string.Join(";", Enumerable.Range(0, 60).Select(i => "T.T" + i + ".M")) }));
@@ -724,7 +729,7 @@ namespace PerformanceLog.Tests
             owner.SpikeContributors.SetValue(-3);         // clamped to 0
             owner.MaxSlowRowsPerMinute.SetValue(1);       // clamped to Config.MaxSlowRowsPerMinuteMin
             owner.OverheadBudgetPercent.SetValue(999f);   // not self-clamping: ApplyTo must clamp it
-            var cfg = new Config();
+            var cfg = new Config { AutoWatch = true };
             owner.ApplyTo(cfg);
             Equal(Config.SlowFrameMsMax, cfg.SlowFrameMs);
             Equal(Config.SummarySecondsMin, cfg.SummarySeconds);
@@ -732,8 +737,8 @@ namespace PerformanceLog.Tests
             Equal(0, cfg.SpikeContributors);
             Equal((int)Config.MaxSlowRowsPerMinuteMin, cfg.MaxSlowRowsPerMinute);
             Equal(Config.OverheadBudgetPercentMax, cfg.OverheadBudgetPercent);
-            // Enabled, Profile, Watch and OutputFolder decide which patches exist, so ApplyTo must never touch them.
-            Equal(true, cfg.Enabled); Equal(Config.ProfileDeep, cfg.Profile); Equal(0, cfg.Watch.Count); Equal("", cfg.OutputFolder);
+            // Enabled, Profile, Watch, AutoWatch and OutputFolder decide which patches exist, so ApplyTo must never touch them.
+            Equal(true, cfg.Enabled); Equal(Config.ProfileDeep, cfg.Profile); Equal(0, cfg.Watch.Count); Equal(true, cfg.AutoWatch); Equal("", cfg.OutputFolder);
         }
 
         static void SettingsSeedFromTheCfgFile()

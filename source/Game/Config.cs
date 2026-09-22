@@ -43,6 +43,8 @@ namespace PerformanceLog
         public int MaxSlowRowsPerMinute = MaxSlowRowsPerMinuteDefault;
         public string OutputFolder = "";
         public readonly List<string> Watch = new List<string>();
+        /// <summary>Also time the patch methods other mods put on hot methods, in the Watch slots the Watch entries leave (Watch.AutoInstall).</summary>
+        public bool AutoWatch = false;
 
         /// <summary>Lines of the file that were not understood, for the log.</summary>
         public readonly List<string> Problems = new List<string>();
@@ -94,6 +96,7 @@ namespace PerformanceLog
                 switch (key.ToLowerInvariant())
                 {
                     case "enabled": Enabled = Bool(key, value, Enabled); break;
+                    case "autowatch": AutoWatch = Bool(key, value, AutoWatch); break;
                     case "slowframems": SlowFrameMs = Clamp(Number(key, value, SlowFrameMs), SlowFrameMsMin, SlowFrameMsMax); break;
                     case "summaryseconds": SummarySeconds = Clamp(Number(key, value, SummarySeconds), SummarySecondsMin, SummarySecondsMax); break;
                     case "profileseconds": ProfileSeconds = Clamp(Number(key, value, ProfileSeconds), ProfileSecondsMin, ProfileSecondsMax); break;
@@ -143,6 +146,6 @@ namespace PerformanceLog
             "Enabled=" + Enabled + ", Profile=" + Profile + ", SlowFrameMs=" + SlowFrameMs.ToString(CultureInfo.InvariantCulture) +
             ", SummarySeconds=" + SummarySeconds.ToString(CultureInfo.InvariantCulture) + ", ProfileSeconds=" + ProfileSeconds.ToString(CultureInfo.InvariantCulture) +
             ", OverheadBudgetPercent=" + OverheadBudgetPercent.ToString(CultureInfo.InvariantCulture) + ", SpikeContributors=" + SpikeContributors + ", MaxSlowRowsPerMinute=" + MaxSlowRowsPerMinute +
-            ", Watch=" + (Watch.Count == 0 ? "(none)" : string.Join(";", Watch));
+            ", Watch=" + (Watch.Count == 0 ? "(none)" : string.Join(";", Watch)) + ", AutoWatch=" + AutoWatch;
     }
 }

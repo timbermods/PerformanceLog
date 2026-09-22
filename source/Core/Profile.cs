@@ -351,6 +351,9 @@ namespace PerformanceLog
             catch (Exception) { }
         }
 
+        /// <summary>A key's calls so far this session: the windows written and the one being collected. Game thread.</summary>
+        public static double CallsSoFar(int id) => id >= 0 && id < calls.Length ? totalCalls[id] + calls[id] : 0;
+
         /// <summary>Registers a watched method and returns its key id. Game thread, before its patch is applied.</summary>
         public static int RegisterMethod(string name, string assembly, int interval)
         {

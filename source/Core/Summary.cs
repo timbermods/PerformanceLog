@@ -287,7 +287,7 @@ namespace PerformanceLog
             Table("Parallel singletons: the game thread starting them", x => x.Kind == ProfileKind.ParallelStart, 8);
             Table("Entity kinds (sampled)", x => x.Kind == ProfileKind.Entity, 15);
             Table("Entity components (sampled; Profile = deep only)", x => x.Kind == ProfileKind.Component, 15);
-            Table("Watched methods (config Watch)", x => x.Kind == ProfileKind.Method, 15);
+            Table("Watched methods (config Watch and AutoWatch)", x => x.Kind == ProfileKind.Method, 15);
 
             var mods = s.Totals.Where(x => x.Kind == ProfileKind.TickSingleton || x.Kind == ProfileKind.UpdateSingleton || x.Kind == ProfileKind.LateSingleton)
                 .GroupBy(x => string.IsNullOrEmpty(x.Mod) ? "(unknown)" : x.Mod).Select(g => new { Mod = g.Key, Ms = g.Sum(x => x.Ms), Kb = g.Sum(x => x.Kb) })

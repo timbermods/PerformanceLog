@@ -60,7 +60,8 @@ same save at the same game speed for at least three minutes each, with the windo
 - **What each measurement source could do** and whether it actually produced anything, so a zero is never mistaken for a measurement.
 - **What measuring itself costs**, per frame, in the file.
 
-Any method can also be timed by name (`Watch` in the config). See the file.
+Any method can also be timed by name (`Watch` in the config), and with `AutoWatch = true` so can the patch methods other mods put on the game's
+hot methods, each on its own row. See the file.
 
 ## Settings
 
@@ -70,7 +71,7 @@ rather than a rough scale-up. This costs a bit more than a lighter profile — s
 ever matters more than the detail.
 
 Six of the settings can be changed from Timberborn's **Mod Settings** menu, with no restart: they take effect from the next game or save you load.
-The rest — `Enabled`, `Profile`, `Watch` and `OutputFolder` — decide which parts of the game get patched, which is settled before that menu exists,
+The rest — `Enabled`, `Profile`, `Watch`, `AutoWatch` and `OutputFolder` — decide which parts of the game get patched, which is settled before that menu exists,
 so they live only in `PerformanceLog.cfg` (next to `manifest.json` in the mod's `version-1.1` folder) and need the game restarted after editing.
 Nothing here changes what the game simulates, so co-op players may use different values.
 
@@ -86,6 +87,7 @@ Nothing here changes what the game simulates, so co-op players may use different
 | `MaxSlowRowsPerMinute` | `300` | .cfg or Mod Settings | At most this many slow frames get a row a minute; the rest are only counted, so a game that is slow all the time cannot fill the disk. |
 | `OutputFolder` | *(empty)* | .cfg only | Where session folders go. Empty = `Documents\Timberborn\PerformanceLog`. |
 | `Watch` | *(none)* | .cfg only | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like. Rows appear in `profile.csv` as kind `method`. |
+| `AutoWatch` | `false` | .cfg only | `true` = also time the patch methods other mods put on the game's hot methods, in the Watch slots the `Watch` entries leave (40 in all). See below. |
 
 The first time you open the Mod Settings page it starts from whatever `PerformanceLog.cfg` already says; after that, whatever you set there is what
 is used, and editing that number in the file no longer does anything (Mod Settings remembers it, not this mod).
@@ -99,6 +101,18 @@ Watch = LateGamePerformance.HaulCache.OnTickStarted; LateGamePerformance.Metrics
 The mod must be enabled so its type can be found. Every call of a watched method pays for a Harmony wrapper and a lookup even when it is not timed, so watching a method that runs thousands of times a tick costs
 more than watching a rare one; the cost is in `overheadUs`. Methods with a `catch ... when` clause are refused (Harmony cannot patch them under Mono and the
 attempt can crash the game) and the log says so.
+
+**`AutoWatch = true`** does this for the patches other mods put on the game's hot methods, without naming them. A mod's prefix on every entity's tick
+(BeaverBuddies has one) or on a singleton's `Tick` (Late Game Performance has several) runs inside a row that names the game or the singleton, so its cost
+is otherwise invisible. When the first game is loaded, the mod reads Harmony's list of patches and times other mods' prefixes, postfixes and finalizers:
+first those on the per-tick and per-frame methods behind the profile's own rows (a singleton's `Tick`, `UpdateSingleton`, `LateUpdateSingleton` or
+`StartParallelTick`, an entity's or a component's `Tick`), then those on the rest of the hot methods the header lists, in name order, in the slots the
+`Watch` entries leave free (40 methods in all; your `Watch` entries always come first). Each gets a `method` row in `profile.csv`, named after the patch
+method and tagged with its mod, and a `# watch|...|auto|...` line in the `frames.csv` header saying which hot method it is on; the ones left out say why.
+It only adds its own timing patch around each patch method: no other mod's patch is removed, reordered or changed. It is off by default because every
+call of a watched method pays for the watch, and some of these run tens of thousands of times a second or more; compare `overheadUs` with it on and off. A
+patch another mod makes after the game has loaded is not seen, and a very small patch method may have been copied into the method it patches by the
+runtime, where no watch can see it (`# capability-final|autoWatch|` lists any that were never seen called).
 
 ## Working with other mods
 

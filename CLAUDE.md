@@ -27,13 +27,14 @@ source/Core/     Pure C# (netstandard2.1), no Unity or Timberborn types: this is
   Profile.cs     Keyed profile (singletons, entity kinds, components, watched methods): exact and sampled timing, budgeted sampling, spike attribution.
   LogWriter.cs   One thread that writes every file (tables from rings, an events queue, files rewritten whole). Never blocks the game thread.
   Summary.cs     summary.md (pure formatting). Header.cs: header lines, and README.md / columns.md text. PatchReport.cs: which mod patches which hot method.
+  AutoWatch.cs   Which of other mods' patch methods the auto watch (AutoWatch = true) times, in the free Watch slots.
   Alloc/Cpu/Milestones/Ring.cs   Small sources.
 source/Game/     The Timberborn side (needs the game's assemblies to compile).
   Plugin.cs      IModStarter, and the Bindito configurators. Reads config, installs patches.
   SessionService Bindito singleton: PostLoad starts a Session, Unload stops it.
   Session.cs     One log from load to unload: folders, header, writer, probe start/stop, summary refresh, events.
   Instrumentation.cs   The Harmony patch list (CreateSpecs) and every patch body. Wrappers.cs: timing wrappers put into the game's singleton arrays, LoadRecorder, SaveTracker.
-  Watch.cs       Config-driven method timing. PlayerLoopTiming.cs: Unity phase markers and the frame boundary. UnityExtras.cs: profiler counters, frame timing.
+  Watch.cs       Config-driven method timing, and the auto watch's patches on other mods' patch methods. PlayerLoopTiming.cs: Unity phase markers and the frame boundary. UnityExtras.cs: profiler counters, frame timing.
   Environment.cs Computer/game facts, mod list, assembly-to-mod map, Harmony patch reader. Config.cs: PerformanceLog.cfg.
   Settings.cs    The in-game settings page (the Mod Settings mod). The only file that touches ModSettings.Core/.Common types.
 tests/           .NET 8 console checks (no test framework). Core checks run for real; game checks run against the installed game's real assemblies.
@@ -101,6 +102,11 @@ To read the game's own code (the way every patch target here was checked): `ilsp
   `SpikeContributors`, `MaxSlowRowsPerMinute`) are in the menu; `SessionService.PostLoad` calls `PerformanceSettings.ApplyTo` to fold them onto `Plugin.Config`
   before each `Session.Start`. A `ModSetting<T>`'s `.Value` is `default(T)` until Mod Settings calls `Load()` (which needs a real `ISettings`/`ModRepository`);
   what this mod controls at construction, and what `Load()` seeds `.Value` from the first time, is `.DefaultValue` — tests read that, not `.Value`.
+- **The auto watch is the one patching done after `StartMod`** (`Watch.AutoInstall`, from `Session.Start` when `AutoWatch = true`): once per run of the
+  game, when the first log starts, because only then are other mods' patches (made at their start and while the game loads) in Harmony's registry, and
+  nothing ticks yet. It only adds this mod's own prefix and postfix (id `kyler.performancelog.watch`) around another mod's patch method; it never unpatches,
+  reorders or changes anyone else's patch. Which methods it takes is decided in `AutoWatch.Plan` (pure, tested in `AutoWatchTests`): name order, not time,
+  because ranking by what the recording measured would mean patching while the game runs.
 - Colony and memory columns are read only when a row is written and carried over otherwise (`lastHeavy` in `Probe`).
 - The tests run each check on a thread-pool thread, and `Probe` is static and remembers the game thread's id: every check that uses it goes through `Rig` in `CoreTests.cs`.
 

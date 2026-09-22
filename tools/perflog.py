@@ -41,7 +41,7 @@ KIND_TITLES = collections.OrderedDict([
     ("parallel-start", "Parallel singletons: the game thread starting them"),
     ("entity", "Entity kinds (sampled)"),
     ("component", "Entity components (sampled; Profile = deep)"),
-    ("method", "Watched methods (config Watch)"),
+    ("method", "Watched methods (config Watch and AutoWatch)"),
 ])
 # A session whose mean frame is faster than this (50 fps) is not what anyone complains about, so a share of its frame is not a finding.
 SLOW_MEAN_MS = 20.0
@@ -366,6 +366,33 @@ def short(name, width=60):
         return name
     tail = name.rsplit(".", 1)[-1]
     return tail if len(tail) <= width else tail[:width]
+
+
+def short_method(name, width=60):
+    """A watched method's label (Namespace.Type.Method(Parameters)) cut to Type.Method(Parameters), keeping the class: an auto-watched patch
+    method is nearly always called Prefix or Postfix, so the method name alone says nothing."""
+    if len(name) <= width:
+        return name
+    head, paren, params = name.partition("(")
+    parts = head.split(".")
+    cls = parts[-2].rsplit("+", 1)[-1] if len(parts) >= 2 else ""
+    shorter = (cls + "." if cls else "") + parts[-1] + paren + params
+    if len(shorter) > width and paren:
+        shorter = (cls + "." if cls else "") + parts[-1] + "(...)"
+    return shorter if len(shorter) <= width else shorter[:width]
+
+
+def short_key(kind, name, width=60):
+    return short_method(name, width) if kind == "method" else short(name, width)
+
+
+def auto_watch_notes(session):
+    """The auto watch's own # watch| lines (label|status|auto|what it is on|owner), by the name profile.csv gives the method (commas become ;)."""
+    notes = {}
+    for w in session.pipe("watch"):
+        if len(w) >= 4 and w[2] == "auto":
+            notes[w[0].replace(",", ";")] = "%s (%s)" % (w[3], w[4]) if len(w) >= 5 and w[4] else w[3]
+    return notes
 
 
 # ---------------------------------------------------------------- the profile
@@ -766,6 +793,7 @@ def report(session, args, out):
     if totals and window_secs > 0:
         p("6. WHERE THE TIME GOES, BY SINGLETON, ENTITY KIND AND METHOD (steady state, %.0f s of profile windows)" % window_secs)
         p("   ms/s = milliseconds of game-thread time per second of play; 'calls' are exact for singletons and watched methods, estimated for sampled kinds.")
+        auto_notes = auto_watch_notes(session)
         for kind, title in KIND_TITLES.items():
             rows = sorted((t for t in totals.values() if t.kind == kind), key=lambda t: -t.ms)
             if not rows:
@@ -774,8 +802,10 @@ def report(session, args, out):
             p("   %s: %.1f ms/s in all" % (title, all_ms / window_secs))
             for t in rows[:(len(rows) if args.all else args.top)]:
                 p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms%s" % (
-                    short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms,
-                    "  (+%d calls never timed)" % t.untimed if t.untimed else ""))
+                    short_key(kind, t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms),
+                    t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms, "  (+%d calls never timed)" % t.untimed if t.untimed else ""))
+                if kind == "method" and t.name in auto_notes:
+                    p("       auto watch: %s" % auto_notes[t.name])
         mods = collections.defaultdict(lambda: [0.0, 0.0])
         for t in totals.values():
             if t.kind in ("tick-singleton", "update-singleton", "late-singleton"):
@@ -976,7 +1006,7 @@ def compare(a, b, args, out):
         p("   %-58s %-22s %9s %9s %9s" % ("", "mod", "A ms/s", "B ms/s", "change"))
         for delta, k, va, vb, t in movers[:args.top]:
             note = "  (only in B)" if k not in pa else "  (only in A)" if k not in pb else ""
-            p("   %-58s %-22s %9.2f %9.2f %+9.2f%s" % ("[%s] %s" % (k[0].split("-")[0], short(k[1], 52)), (mod_of(a, t) or "")[:22], va, vb, delta, note))
+            p("   %-58s %-22s %9.2f %9.2f %+9.2f%s" % ("[%s] %s" % (k[0].split("-")[0], short_key(k[0], k[1], 52)), (mod_of(a, t) or "")[:22], va, vb, delta, note))
         mods = collections.defaultdict(lambda: [0.0, 0.0])
         for k, t in pa.items():
             if k[0] in ("tick-singleton", "update-singleton", "late-singleton"):
@@ -1034,9 +1064,9 @@ def compare_pointers(a, b, Sa, Sb, diffs, cautions, rows, movers=()):
     gone = [(k, va_) for _, k, va_, vb_, t in movers if vb_ == 0 and va_ >= 0.5]
     added = [(k, vb_) for _, k, va_, vb_, t in movers if va_ == 0 and vb_ >= 0.5]
     if gone:
-        lines.append("Only A has these (the ones above 0.5 ms/s): " + "; ".join("%s (%.1f ms/s)" % (short(k[1], 48), v) for k, v in gone[:4]) + ". Time they took is time B does not spend.")
+        lines.append("Only A has these (the ones above 0.5 ms/s): " + "; ".join("%s (%.1f ms/s)" % (short_key(k[0], k[1], 48), v) for k, v in gone[:4]) + ". Time they took is time B does not spend.")
     if added:
-        lines.append("Only B has these (the ones above 0.5 ms/s): " + "; ".join("%s (%.1f ms/s)" % (short(k[1], 48), v) for k, v in added[:4]) + ". Time B spends that A does not.")
+        lines.append("Only B has these (the ones above 0.5 ms/s): " + "; ".join("%s (%.1f ms/s)" % (short_key(k[0], k[1], 48), v) for k, v in added[:4]) + ". Time B spends that A does not.")
     only_a = [m for m in a.mods if m not in b.mods]
     only_b = [m for m in b.mods if m not in a.mods]
     if only_a or only_b:
