@@ -6,14 +6,16 @@ since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (92 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (48 checks).
+`dotnet run --project tests -c Release` (101 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (50 checks).
 
 | What | How |
 |---|---|
 | Frame accounting: slots are exclusive and add up to the frame; unbalanced scopes; other threads ignored; allocation attribution; flags; ticks and buckets; Unity phases; summaries and histograms | Real `Probe` against a scripted clock (`CoreTests`) |
 | The per-frame path allocates nothing | `GC.GetAllocatedBytesForCurrentThread` around 2000 frames; also for a wrapper with the log off |
 | Failure containment: a failing clock switches the probe off, a full ring drops rows and counts them | `CoreTests` |
+| The cost charged for each patch call (`patchCallNs`) is at least what the entity patch's own bodies take on a call that is not sampled, timed with the log on and sampling held off (the part Harmony adds needs the game); the `# calibration|` line names both, or says `unmeasured` | `CoreTests.UnsampledBodyTiming`, `CoreTests.CalibrationLine`, `GameBindingTests.PatchCostCoversTheBodies` |
 | The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution, entities keyed by kind and not by a beaver's own name (`perflog.py` adds up older recordings' rows the same way) | `ProfileTests`, `test_perflog.EntityRollupTests` |
+| Watched methods: each is sampled at its own rate, widening with its own load inside the budget, kept through windows it is not called in (so bursts stay inside it too) and coming back down when it runs less, with a row (and at least one timing) for every window it ran in; calls nobody timed get a `sampled` 0 row and stay out of the totals | `WatchSamplingTests`, `test_perflog` |
 | The files: header, columns, invariant number format in any language, text tails, events, a file rewritten whole, an unopenable path, dropped rows, flush on stop | `WriterTests` |
 | `summary.md`, `README.md` and `columns.md` generation | `SummaryTests`, `WriterTests.EndToEnd` |
 | Every patch target exists in the installed game (1.1.2.4), has no exception filter, and takes only parameters Harmony can supply | `GameBindingTests.TargetsResolve` |
@@ -93,7 +95,11 @@ What it shows, and the line that shows it:
 1. **Copying or zipping a session folder while the game runs** (0.1.1): a recording cannot show it. `WriterTests.ReadableWhileRunning` and `RetriesWhenHeld` check it outside
    the game. The other 0.1.1 fixes are verified in the game (above).
 2. **Overhead** measured against a game running without the mod. The mod's own estimate (0.1.0: 0.3% of a frame paused, 0.8% at speed 7) left out the wrapper swapping and used a default cost for a
-   patch; 0.1.1 measures the patch cost, but nobody has compared the frame rate with the mod off. See the checklist.
+   patch. 0.1.1 to 0.1.3 measured the patch cost on an empty patch, which shows 0 in every recording (`patchCallNs|0`): where it read exactly 0 the per-call patches were still charged the
+   40 ns default, where it read a fraction of a nanosecond they were charged almost nothing (`perflog.py` says which when a recording's rows show it). The cost is now the real bodies
+   (`patchBodyNs`) plus what Harmony adds (`patchCallNs`), but that has not run in a game yet, and nobody has compared the frame rate with the mod off. See the checklist. The figure is
+   the entity patch's; a watched method's call (config `Watch`) costs somewhat more (a lookup, and Harmony passing `__originalMethod`) and is charged the same, so with `Watch`
+   entries `overheadUs` still undercharges a little.
 3. **Co-op**: with BeaverBuddies actually connected to another player. It has only been seen running with BeaverBuddies loaded in a single-player game.
 4. **`Ticker.FinishFullTick`** (one of the four save-stage patches) is counted inside `save stages`, so it has not been seen separately; the stages of three saves were recorded.
 5. **The mod attribution** (which DLL belongs to which mod) worked for the mods in the first recording (`beaverbuddies`, `Kyler.OptimizedLocalHousing`, `eMka.ModSettings`, `kyler.persistentworkareas`);
@@ -124,6 +130,7 @@ What it shows, and the line that shows it:
    `# capability-final|patchCalls|...` lines at the end say non-zero counts, and none says `never ran`, including `MeteredTickableComponent.Tick (sampled calls)`.
    `singleton wrappers put in place` should be a handful (one or two per array). `# capability|workingSet|...` should say `from Windows`.
    `# capability-final|profilerRecorder|...` and `frameTiming` may legitimately say `never produced a value` in a release build.
+   `# calibration|...` has `patchBodyNs` and `patchCallNs` of a few nanoseconds each (not `0` and not `unmeasured`), `patchCallNs` at least `patchBodyNs`.
 7. `profile.csv` has rows of kind `component`, not just `entity`, and its `entity` rows are kinds: one `BeaverAdult`, not a `BeaverAdult(Clone)` and a row per beaver
    (`BeaverAdult Malak`). `summary.md`'s entity table says the same.
 8. Compare the frame rate the game shows with `summary.md`'s mean; they should agree.

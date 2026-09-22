@@ -47,6 +47,24 @@ KIND_TITLES = collections.OrderedDict([
 SLOW_MEAN_MS = 20.0
 LOAD_KINDS = ("load", "load-non-singleton", "post-load", "post-load-non-singleton")
 
+# Up to 0.1.3 the `# calibration|` line's patchCallNs timed an empty patch instead of the patch bodies, and every recording shows 0 there. What
+# overheadUs charged each call of the per-call patches then depends on a reading the header rounds away: exactly 0 made the mod charge an assumed
+# 40 ns a call, a reading above 0 made it charge that. A reading above 0 in the header, or a row whose overheadUs is below 40 ns a patch call, proves
+# the second, and an empty patch leaves the bodies out, so those calls were undercharged.
+# Neither note is printed for a recording whose calibration line has patchBodyNs (KNOWN_ISSUE_APPLIES): a build of the fix that still carries an
+# older version number measures the patch bodies already.
+PATCH_CHARGE_ASSUMED_NS = 40.0
+PATCH_COST_NOTE = ("overheadUs understates what the mod itself cost: every call of its per-call patches (entity ticks, components, watched "
+                   "methods; the patchCalls column) was charged less than they cost. patchCallNs in the `# calibration|` line timed an empty patch "
+                   "instead of the real bodies and came out above 0 (the header says so, or this recording has rows whose overheadUs is below "
+                   "the 40 ns a patch call the mod assumes when that reading is exactly 0), so those calls (about 100,000 a second at speed 7 with Profile = deep) "
+                   "are missing from overheadUs and from the 'measuring cost more than 2% of a frame' warning. The real bodies take a few "
+                   "nanoseconds a call, plus what Harmony adds.")
+PATCH_COST_GUESS_NOTE = ("overheadUs's charge for the per-call patches (entity ticks, components, watched methods; the patchCalls column) is not "
+                         "a measurement. patchCallNs|0 in the `# calibration|` line timed an empty patch instead of the real bodies: a reading of "
+                         "exactly 0 made the mod charge an assumed 40 ns a call, one just above 0 made it charge almost nothing, and no row in "
+                         "this recording shows which. The real bodies take a few nanoseconds a call, plus what Harmony adds.")
+
 # Printed only for a recording whose entity rows really are split (KNOWN_ISSUE_APPLIES): a build of the fix that still carries an older version number
 # writes kinds already.
 ENTITY_SPLIT_NOTE = ("Entity rows are split by name: a beaver or bot loaded from the save is keyed by its own name ('BeaverAdult <name>'; the game renames "
@@ -66,8 +84,46 @@ KNOWN_ISSUES = [
     ("0.1.1", "prDraw and prBatches are 0: Unity 6 has no counter by those names (its draw calls are split into several). The other columns are unaffected."),
     ("0.1.1", "While the game ran, frames.csv, profile.csv, spikes.csv and events.csv were held open by the mod, so copying or zipping the folder could leave them out "
               "(the folder listing shows size 0). Exit the game first, or read them with shared access."),
+    ("0.1.4", PATCH_COST_NOTE),
+    ("0.1.4", PATCH_COST_GUESS_NOTE),
     ("0.1.4", ENTITY_SPLIT_NOTE),
 ]
+
+
+def _empty_patch_charges(session):
+    """For a recording whose `# calibration|` line has patchCallNs and no patchBodyNs (an empty patch was timed, not the bodies): how many
+    rows ran patches, how many of those were charged less than the 40 ns a patch call assumed for a reading of exactly 0, and the reading.
+    None otherwise."""
+    calibration = session.pipe("calibration")
+    if not calibration or any("patchBodyNs" in parts for parts in calibration):
+        return None
+    reading = [parts[i + 1] for parts in calibration for i in range(len(parts) - 1) if parts[i] == "patchCallNs"]
+    try:
+        ns = float(reading[0]) if reading else None
+    except ValueError:
+        return None
+    if ns is None:
+        return None
+    ran = below = 0
+    for r in session.rows:
+        calls, frames = r.get("patchCalls", 0.0), r.get("frames", 0.0)
+        if calls <= 0 or frames <= 0:
+            continue
+        ran += 1
+        # overheadUs is a mean per frame, written to 0.1 us; patchCalls is the total over the row's frames.
+        if (r.get("overheadUs", 0.0) + 0.05) * frames < PATCH_CHARGE_ASSUMED_NS / 1000.0 * calls:
+            below += 1
+    return ran, below, ns
+
+
+def _patch_cost_was_understated(session):
+    charges = _empty_patch_charges(session)
+    return charges is not None and charges[0] > 0 and (charges[1] > 0 or charges[2] > 0)
+
+
+def _patch_cost_was_a_guess(session):
+    charges = _empty_patch_charges(session)
+    return charges is not None and charges[0] > 0 and charges[1] == 0 and charges[2] == 0
 
 
 def _entity_rows_are_split(session):
@@ -76,7 +132,8 @@ def _entity_rows_are_split(session):
 
 # Notes that only some recordings of the versions they name have, each with the check that finds the problem in a recording (a note not listed
 # here is printed for every recording made before its fix).
-KNOWN_ISSUE_APPLIES = {ENTITY_SPLIT_NOTE: _entity_rows_are_split}
+KNOWN_ISSUE_APPLIES = {PATCH_COST_NOTE: _patch_cost_was_understated, PATCH_COST_GUESS_NOTE: _patch_cost_was_a_guess,
+                       ENTITY_SPLIT_NOTE: _entity_rows_are_split}
 
 GAME_ASSEMBLY_PREFIXES = ("Timberborn.", "Bindito.", "UnityEngine", "Unity.", "System")
 
@@ -333,6 +390,7 @@ class KeyTotal:
     def __init__(self, kind, name, mod, assembly):
         self.kind, self.name, self.mod, self.assembly = kind, name, mod, assembly
         self.ms = self.kb = self.calls = self.sampled = self.max_ms = 0.0
+        self.untimed = 0.0   # calls in rows with sampled 0 (a watched method nobody timed in that window): not in calls, so ms/calls stays honest
 
 
 def entity_kind(name):
@@ -361,6 +419,9 @@ def profile_totals(session, tick_from=0, tick_to=None):
         t = totals.get(key)
         if t is None:
             t = totals[key] = KeyTotal(r["kind"], name, r.get("mod", ""), r.get("assembly", ""))
+        if r["sampled"] <= 0 and r["calls"] > 0:
+            t.untimed += r["calls"]
+            continue
         t.ms += r["ms"]; t.kb += r["allocKB"]; t.calls += r["calls"]; t.sampled += r["sampled"]; t.max_ms = max(t.max_ms, r["maxMs"])
     return totals
 
@@ -742,8 +803,9 @@ def report(session, args, out):
             all_ms = sum(t.ms for t in rows)
             p("   %s: %.1f ms/s in all" % (title, all_ms / window_secs))
             for t in rows[:(len(rows) if args.all else args.top)]:
-                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms" % (
-                    short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms))
+                p("     %-58s %-26s %8.2f ms/s %4s  %6.1f us/call  %7.1f KB/s  slowest %.2f ms%s" % (
+                    short(t.name, 58), (mod_of(session, t) or "")[:26], t.ms / window_secs, pct(t.ms, all_ms), t.ms * 1000 / t.calls if t.calls else 0, t.kb / window_secs, t.max_ms,
+                    "  (+%d calls never timed)" % t.untimed if t.untimed else ""))
         mods = collections.defaultdict(lambda: [0.0, 0.0])
         for t in totals.values():
             if t.kind in ("tick-singleton", "update-singleton", "late-singleton"):
