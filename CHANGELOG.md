@@ -44,7 +44,7 @@ that recording. Each one that can be checked outside the game has a check that f
   figures and the garbage-collection section**; `tools/perflog.py` says so.
 - **Files are no longer held open.** 0.1.0 kept `frames.csv`, `profile.csv`, `spikes.csv` and `events.csv` open for writing, so zipping or copying the folder while the game ran silently left them
   out (and a folder listing showed size 0). They are now opened, appended to and closed on each write, shared with readers, and retried if someone else holds them.
-- **Every singleton of the game itself was labelled with no mod ("(unknown)")**; the mod map was installed without the game's own assemblies. They are now `game`. The analysis tool applies the same
+- **Every singleton of the game itself was labeled with no mod ("(unknown)")**; the mod map was installed without the game's own assemblies. They are now `game`. The analysis tool applies the same
   rule to older recordings.
 - **`workingMB` was always 0** (Unity's Mono reports 0 for the process's memory). It now asks Windows, and the header says where the figure comes from (`# capability|workingSet|...`).
 - **Loading steps now record how much the managed heap grew** during each one (`allocKB` of the load rows, "heap grew MB" in `summary.md`, and a finding in the report). The first recording's
