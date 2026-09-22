@@ -445,9 +445,26 @@ class EntityRollupTests(unittest.TestCase):
             line = [l for l in text.splitlines() if l.strip().startswith("BeaverAdult ")][0]
             self.assertIn("78%", line, "adults are 700 of the 900 ms of entity time")
             self.assertNotIn("Malak", text)
-            self.assertIn("named after each beaver", text, "the recording's own summary.md still splits them, and the report says so")
+            self.assertIn("KNOWN ISSUE in Performance Log 0.1.3: " + perflog.ENTITY_SPLIT_NOTE, text,
+                          "the recording's own profile.csv and summary.md still split them, and the report says so")
         finally:
             s.cleanup()
+
+    def test_a_recording_whose_entity_rows_are_kinds_gets_no_split_note(self):
+        # A build of the fix that still says 0.1.3 (it is not released yet), and the checked-in fixture the mod's own code wrote.
+        s = Synthetic(header={"mod": "0.1.3"})
+        add_entity_rows(s, NEW_ENTITY_ROWS)
+        try:
+            folder = s.write()
+            self.assertNotIn(perflog.ENTITY_SPLIT_NOTE, perflog.known_issues(perflog.load_session(folder)))
+            code, text = run("report", folder, "--warmup", "0")
+            self.assertEqual(0, code)
+            self.assertNotIn("rows named after single beavers", text)
+        finally:
+            s.cleanup()
+        self.assertEqual("0.1.3", perflog.load_session(WITH_MOD).h("mod"), "the fixture is old enough for the note to be in question")
+        _, text = run("report", WITH_MOD, "--warmup", "10")
+        self.assertNotIn("rows named after single beavers", text)
 
     def test_an_old_recording_lines_up_with_a_new_one(self):
         a, b = Synthetic(header={"mod": "0.1.3"}), Synthetic(header={"mod": "0.1.4"})
@@ -581,7 +598,10 @@ class FindingTests(unittest.TestCase):
         s = Synthetic(header={"mod": "0.1.1"})
         for _ in range(6):
             s.window()
-        self.assertNotIn("four times every frame", self.report(s), "the version that fixed them does not have them")
+        text = self.report(s)
+        for fixed, note in perflog.KNOWN_ISSUES:
+            if perflog.version_tuple(fixed) <= (0, 1, 1):
+                self.assertNotIn(note, text, "the version that fixed them does not have them")
         newest = max((fixed for fixed, _ in perflog.KNOWN_ISSUES), key=perflog.version_tuple)
         s = Synthetic(header={"mod": newest})
         for _ in range(6):

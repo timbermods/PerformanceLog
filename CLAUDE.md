@@ -85,7 +85,8 @@ To read the game's own code (the way every patch target here was checked): `ilsp
   (`TickableEntity.Tick`), so that is sampled.
 - **An entity is keyed by its kind, not by the name the tick system recorded** (`Profile.EntityKindOf`: the name up to its first space or `(`). The game renames a character loaded from a
   save to `<template> <its own name>` before the tick system records it, and one made during play is `<template>(Clone)`, so up to 0.1.3 every loaded beaver was its own row and beavers
-  ranked far too low. `tools/perflog.py` (`entity_kind`) applies the same rule to older recordings, so compare lines old and new up: change both together.
+  ranked far too low. `tools/perflog.py` (`entity_kind`) applies the same rule to older recordings, so compare lines old and new up: change both together. Its known-issue
+  note is printed only when a recording's entity rows really are split. No template name in the game or the installed mods contains a space or `(`; a modded template whose name did would be cut short.
 - **Saves are timed at three hooks** (`SaveQueued`, `SaveInstantlySkippingNameValidation`, `SaveWriter.WriteToSaveStream`); whichever is entered first owns the save (`SaveTracker`), and a save open for
   a minute is treated as abandoned (the game's save throws on an IO error and skips its postfix). BeaverBuddies defers the real save, so the `SaveWriter` hook is what times it.
 - **Nothing a session holds may outlive it**: `Session.Stop` clears `services` (its delegates reach the whole colony), the colony sampler, the mod resolver and the milestones, and `Session.Start`
