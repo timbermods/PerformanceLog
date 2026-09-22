@@ -45,6 +45,10 @@ KIND_TITLES = collections.OrderedDict([
 ])
 # A session whose mean frame is faster than this (50 fps) is not what anyone complains about, so a share of its frame is not a finding.
 SLOW_MEAN_MS = 20.0
+# A singleton is blamed for a slow frame only when it took at least this share of the frame (percent) or this many milliseconds, as in the
+# mod's summary.md (Summary.BlameMinShare, BlameMinMs): the biggest singleton of a frame a save or a collection made slow is a millisecond or two.
+BLAME_MIN_SHARE = 10.0
+BLAME_MIN_MS = 5.0
 LOAD_KINDS = ("load", "load-non-singleton", "post-load", "post-load-non-singleton")
 
 # What is wrong with recordings made by an older Performance Log, found when a recording was first read. Each entry is (fixed in, note): the note
@@ -605,6 +609,28 @@ def findings_for(session, args):
 
 # ---------------------------------------------------------------- report
 
+def blame_text(frame_row, spikes):
+    """What a slow frame is blamed on in section 5: the singletons that took a real part of it, or that none did and what else the frame had.
+    Empty when spikes.csv has nothing for the frame (no singleton was timed in it)."""
+    ranked = sorted(spikes, key=lambda x: x["rank"])
+    if not ranked:
+        return ""
+    frame_ms = frame_row["frameMs"]
+
+    def share(x):
+        return x["share"] if "share" in x else (100.0 * x["ms"] / frame_ms if frame_ms else 0.0)
+    named = []
+    for x in ranked[:2]:
+        if x["ms"] < BLAME_MIN_MS and share(x) < BLAME_MIN_SHARE:
+            break  # biggest first, so nothing after it is bigger
+        named.append(x)
+    if named:
+        return "  <- " + ", ".join("%s %.0f ms" % (short(x.get("name", "?"), 40), x["ms"]) for x in named)
+    had = [what for what, on in (("a save", frame_row["saving"]), ("a garbage collection", frame_row["gcDelta"] > 0)) if on]
+    return "  <- no singleton stood out (largest %.1f ms, %.1f%% of the frame)%s" % (ranked[0]["ms"], share(ranked[0]),
+                                                                                 "; the frame had " + " and ".join(had) if had else "")
+
+
 def report(session, args, out):
     p = lambda text="": out.write(text + "\n")
     S = steady(session, args.warmup)
@@ -692,10 +718,9 @@ def report(session, args, out):
             why.append("background")
         if r["paused"]:
             why.append("paused")
-        b = sorted(blame.get(int(r["frame"]), []), key=lambda x: x["rank"])[:2]
         p("   frame %-6d tick %-6d %6.0f ms  speed %g  %s%s%s" % (r["frame"], r["tick"], r["frameMs"], r["speed"],
                                                                 "[" + ",".join(why) + "] " if why else "", ", ".join("%s %.0f" % (s, v) for v, s in parts),
-                                                                ("  <- " + ", ".join("%s %.0f ms" % (short(x.get("name", "?"), 40), x["ms"]) for x in b)) if b else ""))
+                                                                blame_text(r, blame.get(int(r["frame"]), []))))
     p()
 
     first = S[0]["tick"] - 1 if S else 0

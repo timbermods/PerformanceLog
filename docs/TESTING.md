@@ -6,7 +6,7 @@ the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (91 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (44 checks).
+`dotnet run --project tests -c Release` (92 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (45 checks).
 
 | What | How |
 |---|---|

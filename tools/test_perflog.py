@@ -570,6 +570,36 @@ class FindingTests(unittest.TestCase):
         text = self.report(s)
         self.assertIn("Nothing stands out", text)
 
+    def test_slow_frames_blame_only_a_singleton_that_took_a_real_part(self):
+        s = Synthetic()
+        for _ in range(6):
+            s.window()
+        # As in the real 0.1.3 session: a save of over a second whose biggest singleton took about 1 ms; as in the sample, a collection
+        # whose biggest singleton took 1 ms of 132; a mod's hitch; and a 6 ms singleton in a 215 ms frame (under 10%, but 5 ms or more).
+        save = s.slow_frame(1142.0, saving=1.0, saveMs=1133.0, gcDelta=1.0, otherMs=7.6)
+        gc = s.slow_frame(132.0, gcDelta=1.0, otherMs=131.0)
+        hitch = s.slow_frame(99.0, updMs=96.0, otherMs=3.0)
+        mixed = s.slow_frame(215.0, gcDelta=1.0, singMs=7.0, otherMs=208.0)
+        for row, rank, name, ms in ((save, 1, "Timberborn.TimbermeshAnimations.AnimatorRegistry", 1.4), (gc, 1, "Timberborn.CoreUI.PanelStack", 1.0),
+                                    (hitch, 1, "LateGamePerformance.RouteMapsBackground", 95.0), (hitch, 2, "Timberborn.CoreUI.PanelStack", 1.0),
+                                    (mixed, 1, "Timberborn.GameDistricts.DistrictCitizenAssigner", 6.0), (mixed, 2, "Timberborn.CoreUI.PanelStack", 1.0)):
+            s.spikes.append({"frame": row["frame"], "tick": row["tick"], "utcMs": row["utcMs"], "frameMs": row["frameMs"], "rank": rank, "kind": "update-singleton",
+                             "id": rank, "ms": ms, "share": 100.0 * ms / row["frameMs"], "name": name, "mod": "game"})
+        text = self.report(s)
+        section = text.split("5. THE SLOWEST FRAMES")[1].split("\n\n")[0]
+
+        def line(row):
+            return [l for l in section.splitlines() if l.strip().startswith("frame %d " % row["frame"])][0]
+        self.assertNotIn("AnimatorRegistry", line(save), "a 1 ms singleton is not blamed for a 1142 ms save")
+        self.assertIn("no singleton stood out", line(save))
+        self.assertIn("save", line(save).split("<-")[1])
+        self.assertNotIn("PanelStack", line(gc), "a 1 ms singleton is not blamed for a 132 ms collection")
+        self.assertIn("garbage collection", line(gc).split("<-")[1])
+        self.assertIn("<- LateGamePerformance.RouteMapsBackground 95 ms", line(hitch))
+        self.assertNotIn("PanelStack", line(hitch), "the 1 ms one behind it is not named")
+        self.assertIn("DistrictCitizenAssigner 6 ms", line(mixed), "5 ms or more is named whatever the share")
+        self.assertNotIn("PanelStack", line(mixed))
+
     def test_hitches_on_a_rhythm_are_matched_to_the_autosave(self):
         s = Synthetic()
         for i in range(12):

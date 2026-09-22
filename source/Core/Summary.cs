@@ -331,7 +331,8 @@ namespace PerformanceLog
             t.Append("## The slowest frames\n\n");
             if (s.Worst.Count == 0) { t.Append("No frame reached the slow-frame threshold.\n\n"); return; }
             t.Append("`frames.csv` has a row for every slow frame and `spikes.csv` the biggest contributors to each; these are the worst ").Append(s.Worst.Count)
-                .Append(". `Biggest parts` are the timed slots of the frame; `Blame` are the singletons that spent the most time in it.\n\n");
+                .Append(". `Biggest parts` are the timed slots of the frame; `Blame` names the singletons that took at least ").Append(F(100 * BlameMinShare, 0))
+                .Append("% of the frame or ").Append(F(BlameMinMs, 0)).Append(" ms, biggest first. When none did, it says so, and whether the frame had a save or a garbage collection, which no singleton's time shows.\n\n");
             t.Append("| Frame | Tick | Frame ms | Speed | Ticks | GC | Save | Biggest parts | Blame |\n|---|---|---|---|---|---|---|---|---|\n");
             foreach (WorstFrame w in s.Worst)
             {
@@ -340,14 +341,42 @@ namespace PerformanceLog
                 for (int i = 0; i < Columns.SlotCount; i++) parts.Add(new KeyValuePair<string, double>(Columns.SlotTimeNames[i], r[Columns.SlotBase + i]));
                 parts.Add(new KeyValuePair<string, double>("otherMs", r[Columns.OtherMs]));
                 string top = string.Join(", ", parts.OrderByDescending(p => p.Value).Take(3).Select(p => p.Key + " " + F(p.Value, 0)));
-                var blame = new List<string>();
-                for (int i = 0; i < w.TopIds.Length && i < 3; i++)
-                    blame.Add(Short(Profile.NameOf(w.TopIds[i])) + " " + F(w.TopMs[i], 0));
                 t.Append("| ").Append(F(r[Columns.Frame], 0)).Append(" | ").Append(F(r[Columns.Tick], 0)).Append(" | ").Append(F(r[Columns.FrameMs], 0)).Append(" | ")
                     .Append(F(r[Columns.Speed], 0)).Append(" | ").Append(F(r[Columns.Ticks], 0)).Append(" | ").Append(r[Columns.GcDelta] > 0 ? "yes" : "").Append(" | ")
-                    .Append(r[Columns.Saving] > 0 ? "yes" : "").Append(" | ").Append(top).Append(" | ").Append(string.Join(", ", blame)).Append(" |\n");
+                    .Append(r[Columns.Saving] > 0 ? "yes" : "").Append(" | ").Append(top).Append(" | ").Append(Blame(w)).Append(" |\n");
             }
             t.Append('\n');
+        }
+
+        /// <summary>
+        /// A singleton is blamed for a slow frame only when it took at least this share of the frame, or at least <see cref="BlameMinMs"/>.
+        /// The biggest singleton of a frame that a save or a collection made slow is usually a millisecond or two of it, and naming it sends the
+        /// reader after the wrong thing. tools/perflog.py uses the same two numbers.
+        /// </summary>
+        public const double BlameMinShare = 0.10;
+        /// <summary>A singleton this long is worth naming in a frame of any length. See <see cref="BlameMinShare"/>.</summary>
+        public const double BlameMinMs = 5;
+
+        /// <summary>The Blame cell of a slow frame: the singletons that took a real part of it, or that none did and what else the frame had.</summary>
+        static string Blame(WorstFrame w)
+        {
+            double[] r = w.Row;
+            double frameMs = r[Columns.FrameMs];
+            var named = new List<string>();
+            // TopIds are biggest first, so the first one below both limits ends the list.
+            for (int i = 0; i < w.TopIds.Length && i < 3; i++)
+            {
+                if (w.TopMs[i] < BlameMinMs && w.TopMs[i] < BlameMinShare * frameMs) break;
+                named.Add(Short(Profile.NameOf(w.TopIds[i])) + " " + F(w.TopMs[i], 0));
+            }
+            if (named.Count > 0) return string.Join(", ", named);
+            string text = "no singleton stood out";
+            if (w.TopIds.Length > 0) text += " (largest " + F(w.TopMs[0]) + " ms, " + Pct(w.TopMs[0], frameMs) + " of the frame)";
+            var had = new List<string>();
+            if (r[Columns.Saving] > 0) had.Add("a save");
+            if (r[Columns.GcDelta] > 0) had.Add("a garbage collection");
+            if (had.Count > 0) text += "; the frame had " + string.Join(" and ", had);
+            return text;
         }
 
         static void Tail(StringBuilder t, SummaryInput s)

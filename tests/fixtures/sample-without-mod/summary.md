@@ -136,17 +136,17 @@ Processor time was not available on this computer.
 
 ## The slowest frames
 
-`frames.csv` has a row for every slow frame and `spikes.csv` the biggest contributors to each; these are the worst 7. `Biggest parts` are the timed slots of the frame; `Blame` are the singletons that spent the most time in it.
+`frames.csv` has a row for every slow frame and `spikes.csv` the biggest contributors to each; these are the worst 7. `Biggest parts` are the timed slots of the frame; `Blame` names the singletons that took at least 10% of the frame or 5 ms, biggest first. When none did, it says so, and whether the frame had a save or a garbage collection, which no singleton's time shows.
 
 | Frame | Tick | Frame ms | Speed | Ticks | GC | Save | Biggest parts | Blame |
 |---|---|---|---|---|---|---|---|---|
-| 7153 | 796 | 433 | 3 | 0 |  | yes | saveMs 430, entMs 2, updMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, Timberborn.TimeSystem.SpeedManager 0 |
-| 1499 | 83 | 121 | 1 | 0 | yes |  | otherMs 119, updMs 1, entMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, Timberborn.TimeSystem.SpeedManager 0 |
-| 6799 | 737 | 121 | 3 | 0 | yes |  | otherMs 117, entMs 2, updMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, Timberborn.TimeSystem.SpeedManager 0 |
-| 5099 | 453 | 109 | 3 | 0 | yes |  | otherMs 105, entMs 2, updMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, Timberborn.TimeSystem.SpeedManager 0 |
-| 699 | 38 | 106 | 1 | 0 | yes |  | otherMs 104, updMs 1, entMs 0 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, Timberborn.TimeSystem.SpeedManager 0 |
-| 3899 | 253 | 105 | 3 | 1 | yes |  | otherMs 99, entMs 2, singMs 2 | Timberborn.WaterSystem.WaterSimulator 1, Timberborn.CoreUI.PanelStack 1, Timberborn.Navigation.NavigationSynchronizer 0 |
-| 2599 | 144 | 97 | 1 | 0 | yes |  | otherMs 95, updMs 1, entMs 1 | Timberborn.CoreUI.PanelStack 1, Timberborn.CameraSystem.CameraService 0, Timberborn.TimeSystem.SpeedManager 0 |
+| 7153 | 796 | 433 | 3 | 0 |  | yes | saveMs 430, entMs 2, updMs 1 | no singleton stood out (largest 0.9 ms, 0.2% of the frame); the frame had a save |
+| 1499 | 83 | 121 | 1 | 0 | yes |  | otherMs 119, updMs 1, entMs 1 | no singleton stood out (largest 0.9 ms, 0.7% of the frame); the frame had a garbage collection |
+| 6799 | 737 | 121 | 3 | 0 | yes |  | otherMs 117, entMs 2, updMs 1 | no singleton stood out (largest 1.1 ms, 0.9% of the frame); the frame had a garbage collection |
+| 5099 | 453 | 109 | 3 | 0 | yes |  | otherMs 105, entMs 2, updMs 1 | no singleton stood out (largest 1.1 ms, 1.0% of the frame); the frame had a garbage collection |
+| 699 | 38 | 106 | 1 | 0 | yes |  | otherMs 104, updMs 1, entMs 0 | no singleton stood out (largest 0.9 ms, 0.9% of the frame); the frame had a garbage collection |
+| 3899 | 253 | 105 | 3 | 1 | yes |  | otherMs 99, entMs 2, singMs 2 | no singleton stood out (largest 1.3 ms, 1.3% of the frame); the frame had a garbage collection |
+| 2599 | 144 | 97 | 1 | 0 | yes |  | otherMs 95, updMs 1, entMs 1 | no singleton stood out (largest 0.9 ms, 0.9% of the frame); the frame had a garbage collection |
 
 ## What each measurement source could do
 
