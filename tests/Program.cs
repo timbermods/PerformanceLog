@@ -65,6 +65,7 @@ namespace PerformanceLog.Tests
             tests.AddRange(SummaryTests.All());
             tests.AddRange(HeapModeTests.All());
             tests.AddRange(GameBindingTests.All(managed));
+            tests.AddRange(AutoWatchTests.All());
 
             int failures = 0;
             foreach (var test in tests)

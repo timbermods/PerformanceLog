@@ -39,7 +39,7 @@ namespace PerformanceLog
             Milestones.Mark("post-load");
             try
             {
-                // The six numbers the in-game settings panel controls (Settings.cs); Enabled/Profile/Watch/OutputFolder came from
+                // The six numbers the in-game settings panel controls (Settings.cs); Enabled/Profile/Watch/AutoWatch/OutputFolder came from
                 // PerformanceLog.cfg already, at StartMod, and are untouched here.
                 settings?.ApplyTo(Plugin.Config);
                 Session.Start(Plugin.Config, new SessionServices

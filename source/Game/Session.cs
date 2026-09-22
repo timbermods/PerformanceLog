@@ -62,6 +62,15 @@ namespace PerformanceLog
                 Milestones.Mark("session-start");
                 warnings.Clear(); finalLines = new List<string>(); lastColony = null;
                 Instrumentation.ResetForSession();
+                // The one moment for the auto watch's patches: every mod has started and the game has loaded, so Harmony's registry holds
+                // the patches it looks for, and nothing ticks yet. Only the first log makes them; they stay for the next save, as the Watch
+                // entries' do. Before the header is written, which lists them. BeaverBuddies has already seeded the game's random numbers
+                // by now, and making a patch draws from them under BeaverBuddies; AutoInstall puts them back (Watch.KeepUnityRandom).
+                if (cfg.AutoWatch)
+                {
+                    Watch.AutoInstall();
+                    if (Watch.Count > 0) Instrumentation.InstalledHit[Instrumentation.HitWatch] = true;
+                }
                 // What does not change during a session is read once, so refreshing the summary does not have to ask the system again.
                 environment = EnvironmentInfo.Collect();
                 modList = services.Mods != null ? EnvironmentInfo.Mods(services.Mods) : new List<string[]>();
@@ -206,6 +215,8 @@ namespace PerformanceLog
                 header.Pipe("capability", "patch", parts[0], parts.Length > 1 ? parts[1] : "", parts.Length > 2 ? parts[2] : "");
             }
             foreach (string result in Watch.Results) { string[] parts = result.Split('|'); header.Pipe("watch", parts[0], parts.Length > 1 ? parts[1] : ""); }
+            header.Pipe("capability", "autoWatch", Watch.AutoCapability(config));
+            foreach (string[] line in Watch.AutoLines()) header.Pipe("watch", line);
             header.Pipe("calibration", Probe.CalibrationParts());
             header.Pipe("sampling", "budgetPercent", config.OverheadBudgetPercent.ToString(CultureInfo.InvariantCulture),
                 "note", "the intervals are chosen again every profile window; profile.csv says how many calls each row rests on");
@@ -351,6 +362,7 @@ namespace PerformanceLog
             foreach (string line in UnityExtras.StartLines()) input.Capabilities.Add(line.Replace("# capability|", "").Replace("|", ": "));
             input.Capabilities.Add("patches on the game: " + Instrumentation.Installed + " installed, " + Instrumentation.Failed + " could not be made; each patch's calls so far are listed at the end of frames.csv");
             foreach (string line in Watch.Results) input.Capabilities.Add("watch " + line.Replace("|", ": "));
+            input.Capabilities.Add("auto watch: " + Watch.AutoCapability(config) + (config.AutoWatch ? " (each is a # watch| line in frames.csv)" : ""));
 
             foreach (string w in warnings) input.Warnings.Add(w);
             foreach (string result in Instrumentation.Results)
@@ -393,6 +405,7 @@ namespace PerformanceLog
                     final.Add("# capability-final|patchCalls|" + Instrumentation.HitName(i) + "|" +
                               (Instrumentation.InstalledHit[i] ? Instrumentation.Hits[i] + (Instrumentation.Hits[i] == 0 ? "|never ran" : "") : "0|patch not installed"));
                 final.Add("# capability-final|profile|" + Profile.Totals().Count + " keys were timed");
+                final.Add("# capability-final|autoWatch|" + (config != null && config.AutoWatch ? Watch.AutoFinal() : "off"));
                 finalLines = final;
                 Event("session-end", 0, reason);
                 // Not while the game is quitting: the engine may already be taking the player loop down.

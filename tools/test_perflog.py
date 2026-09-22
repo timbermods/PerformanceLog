@@ -295,6 +295,29 @@ class CompareTests(unittest.TestCase):
         finally:
             a.cleanup(); b.cleanup()
 
+    def test_turning_the_auto_watch_on_is_not_extra_time(self):
+        # The cost check the auto watch asks for: the same play with AutoWatch off (A) and on (B). The entity rows are the same; B also has a row
+        # for BeaverBuddies' prefix on every entity's tick, whose time is already inside those entity rows.
+        a, b = Synthetic(), Synthetic()
+        entity = "BeaverBuddies.DeterminismService+TickableEntityTickPatcher.Prefix(TickableEntity)"
+        try:
+            b.pipes.append(["watch", entity, "watching", "auto", "prefix on Timberborn.TickSystem.TickableEntity.Tick", "timbermods.BeaverBuddiesMultiColony"])
+            for w in range(1, 9):
+                for s in (a, b):
+                    s.window()
+                    s.profile.append({"kind": "entity", "window": w, "tick": s.tick, "id": 1, "calls": 5000, "sampled": 100, "ms": 500.0, "allocKB": 0,
+                                      "maxMs": 0.2, "name": "BeaverAdult", "assembly": "Timberborn.Beavers", "mod": "game"})
+                b.profile.append({"kind": "method", "window": w, "tick": b.tick, "id": 2, "calls": 5000, "sampled": 100, "ms": 20.0, "allocKB": 0,
+                                  "maxMs": 0.1, "name": entity, "assembly": "BeaverBuddies", "mod": "beaverbuddies"})
+            _, text = run("compare", a.write(), b.write(), "--warmup", "0")
+            self.assertIn("[method] TickableEntityTickPatcher.Prefix(TickableEntity)", text, "named by class and method in the table")
+            self.assertIn("rows are watched methods (Watch or AutoWatch): their time is inside the row of whatever runs them", text)
+            self.assertIn("Only B watched these methods (the ones above 0.5 ms/s): TickableEntityTickPatcher.Prefix(TickableEntity) (2.0 ms/s)", text)
+            self.assertNotIn("Only B has these", text, "a watched method is not time B spends on top")
+            self.assertNotIn("Time B spends that A does not", text)
+        finally:
+            a.cleanup(); b.cleanup()
+
 
 class RobustnessTests(unittest.TestCase):
     def setUp(self):
@@ -435,6 +458,12 @@ class HelperTests(unittest.TestCase):
         self.assertEqual("-", perflog.change(0, 0))
         self.assertEqual("TheClass", perflog.short("Some.Very.Long.Namespace.That.Goes.On.And.On.Forever.And.Ever.TheClass", 40))
         self.assertEqual("Short.Name", perflog.short("Short.Name"))
+        # A watched method keeps its class (a patch method is nearly always called Prefix or Postfix), and drops its parameters only if it must.
+        self.assertEqual("TickableEntityTickPatcher.Prefix(TickableEntity)",
+                         perflog.short_method("BeaverBuddies.DeterminismService+TickableEntityTickPatcher.Prefix(TickableEntity)", 58))
+        self.assertEqual("VeryLongClassNameForTesting.Method(...)",
+                         perflog.short_method("A.B.VeryLongClassNameForTesting.Method(Int32,String,Boolean,Single,Double,Int64)", 40))
+        self.assertEqual("Some.Mod.Method()", perflog.short_method("Some.Mod.Method()"))
 
     def test_other_ms_is_split_by_unity_phase(self):
         # A 20 ms frame: 4 ms of entity ticks and 2 ms of singleton updates inside a 9 ms Update phase, 0.5 ms of late singletons inside a
@@ -787,6 +816,40 @@ class FindingTests(unittest.TestCase):
                               "ms": 50.0 if timed else 0.0, "allocKB": 0, "maxMs": 0.6 if timed else 0.0, "name": "Some.Mod.Method()", "assembly": "SomeMod", "mod": "somemod"})
         text = self.report(s)
         self.assertRegex(text, r"Some\.Mod\.Method\(\).*\b500\.0 us/call.*\(\+40 calls never timed\)")
+
+    def test_auto_watched_patch_methods_say_which_hot_method_they_are_on(self):
+        s = Synthetic(header={"mod": "0.1.3"})
+        # What the mod writes with AutoWatch = true: a # watch| line for each patch method it chose, and profile.csv rows named like a Watch entry
+        # (whose commas the CSV turns into ;).
+        entity = "BeaverBuddies.DeterminismService+TickableEntityTickPatcher.Prefix(TickableEntity)"
+        panel = "LateGamePerformance.UiThrottle.PanelPrefix(EntityPanel,Boolean)"
+        s.pipes.append(["watch", entity, "watching", "auto", "prefix on Timberborn.TickSystem.TickableEntity.Tick", "timbermods.BeaverBuddiesMultiColony"])
+        s.pipes.append(["watch", panel, "watching", "auto", "prefix on Timberborn.EntityPanelSystem.EntityPanel.UpdateSingleton (can replace it)",
+                        "kyler.lategameperformance.UiThrottle"])
+        s.pipes.append(["watch", "Some.Mod.Method()", "watching"])
+        for w in range(1, 7):
+            s.window()
+            for i, (name, assembly) in enumerate(((entity, "BeaverBuddies"), (panel.replace(",", ";"), "LateGamePerformance"), ("Some.Mod.Method()", "SomeMod"))):
+                s.profile.append({"kind": "method", "window": w, "tick": s.tick, "id": 5 + i, "calls": 1000, "sampled": 50, "ms": 20.0 - i, "allocKB": 0,
+                                  "maxMs": 0.1, "name": name, "assembly": assembly, "mod": assembly.lower()})
+        text = self.report(s)
+        # A patch method is named by its class, not only as "Prefix", and says which hot method it is on and whose patch it is.
+        self.assertIn("TickableEntityTickPatcher.Prefix(TickableEntity)", text)
+        self.assertIn("auto watch: prefix on Timberborn.TickSystem.TickableEntity.Tick (timbermods.BeaverBuddiesMultiColony)", text)
+        self.assertIn("auto watch: prefix on Timberborn.EntityPanelSystem.EntityPanel.UpdateSingleton (can replace it) (kyler.lategameperformance.UiThrottle)", text)
+        self.assertRegex(text, r"Some\.Mod\.Method\(\)")
+        self.assertEqual(2, text.count("auto watch: "), "a method the config's Watch named is not called an auto watch")
+
+    def test_auto_watch_lines_without_rows_do_not_blame_watch_entries(self):
+        s = Synthetic(header={"mod": "0.1.3"})
+        s.pipes.append(["watch", "Some.Mod.Patch.Prefix()", "watching", "auto", "prefix on Timberborn.TickSystem.Ticker.Update", "some.mod"])
+        for w in range(1, 7):
+            s.window()
+            s.profile.append({"kind": "entity", "window": w, "tick": s.tick, "id": 1, "calls": 100, "sampled": 10, "ms": 5.0, "allocKB": 0,
+                              "maxMs": 0.1, "name": "BeaverAdult", "assembly": "Timberborn.Beavers", "mod": "game"})
+        text = self.report(s)
+        self.assertIn("(watched methods were set up (Watch entries or AutoWatch), but none produced rows: ", text)
+        self.assertNotIn("Watch entries were configured", text)
 
     def test_loading_that_grew_the_heap_is_reported(self):
         s = Synthetic()

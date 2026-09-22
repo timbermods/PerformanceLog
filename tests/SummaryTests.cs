@@ -17,7 +17,7 @@ namespace PerformanceLog.Tests
             yield return ("Summary: slow frames without a row of their own are said to be counted", SkippedRowsAreExplained);
             yield return ("Summary: a slow frame's Blame names only a singleton that took a real part of it, else says what the frame had", BlameNeedsARealShare);
             yield return ("Summary: otherMs is split by Unity phase, each phase less the timed parts that run in it", OtherSplitByPhase);
-            yield return ("Summary: long class names are shortened and short ones kept", ShortNames);
+            yield return ("Summary: long class names are shortened and short ones kept; a watched method keeps its class", ShortNames);
             yield return ("Readme: placeholders are filled and no placeholder is left", ReadmePlaceholders);
         }
 
@@ -222,6 +222,13 @@ namespace PerformanceLog.Tests
             string longName = "Some.Very.Long.Namespace.That.Goes.On.And.On.Forever.And.Ever.TheClass";
             Equal("TheClass", Summary.Short(longName));
             Equal("?", Summary.Short(null));
+            // A watched method keeps its class (an auto-watched patch method is nearly always called Prefix or Postfix), as perflog.py's short_method does.
+            Equal("TickableEntityTickPatcher.Prefix(TickableEntity)", Summary.ShortMethod("BeaverBuddies.DeterminismService+TickableEntityTickPatcher.Prefix(TickableEntity)"));
+            Equal("TextEditingInputPatch.Finalizer(Exception)", Summary.ShortMethod("MixedStorage.TextEditingInputPatch.Finalizer(Exception)"));
+            Equal("VeryLongClassNameForTestingTheSummaryTable.Method(...)",
+                Summary.ShortMethod("A.B.VeryLongClassNameForTestingTheSummaryTable.Method(Int32,String,Boolean,Single,Double,Int64)"));
+            Equal("Some.Mod.Method()", Summary.ShortMethod("Some.Mod.Method()"));
+            Equal("?", Summary.ShortMethod(null));
         }
 
         static void ReadmePlaceholders()

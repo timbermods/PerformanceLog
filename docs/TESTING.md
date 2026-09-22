@@ -6,7 +6,7 @@ since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (106 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (62 checks).
+`dotnet run --project tests -c Release` (113 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (65 checks).
 
 | What | How |
 |---|---|
@@ -27,6 +27,7 @@ since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1
 | The resolver the game side installs names a mod's DLL, `game` for the game's own and leaves the rest unknown; loading steps carry the heap growth | `ProfileTests` |
 | Profile = off leaves the entity tick unpatched; an abandoned save does not block the next; the parallel tick figure is not counted twice; slow-frame rows are limited per minute; the summary is made on the writer thread | `GameBindingTests`, `CoreTests`, `WriterTests` |
 | The config file, the watch list resolution against the real game types | `GameBindingTests` |
+| The auto watch (`AutoWatch = true`): only other mods' prefixes, postfixes and finalizers on the methods behind the profile's rows or on the hot list are taken, in name order whatever order Harmony lists them in, one watch per patch method; never more than the slots the Watch entries left, a Watch entry's method is not watched twice, and a refused or failed patch takes no slot; a patch is examined (label, exception filter, generic) the way a Watch entry is, against real methods; a watched patch method is counted, timed and named in `profile.csv`, and its watch allocates nothing; a prefix that can skip the method it patches is marked `(can replace it)`; the header's `# watch|` and `# capability|autoWatch|` lines and the end's never-called list; every patch is made, and Harmony's registry read, inside `Watch.KeepUnityRandom`, which reads `UnityEngine.Random.state` before and writes it back in a `finally` (checked in its IL; Unity itself cannot run here); the report, `compare` and `summary.md` name each by its class, and `compare` does not count a method only one side watched as extra time | `AutoWatchTests`, `SummaryTests`, `test_perflog` |
 | The analysis tool reads what the mod writes (fixtures come from the real writer) and each finding fires on its situation and not on a healthy one | `tools/test_perflog.py`, `WriterTests.FixturesAreCurrent` |
 | The in-game settings panel's values are clamped onto a `Config` the same way `PerformanceLog.cfg` is, only the six settings that can be, and the panel starts from what the .cfg file already had | `GameBindingTests.SettingsApplyTo`, `SettingsSeedFromTheCfgFile` |
 | A fresh `Config` (nothing set) is `Profile = deep`, `SpikeContributors = 8` and `OverheadBudgetPercent = 1`; a bad or missing `Profile` line falls back to `deep`, not `standard` | `GameBindingTests.ConfigParsing`, `ConfigProblems` |
@@ -113,6 +114,20 @@ What it shows, and the line that shows it:
    `ISettings`/`ModRepository`/`ModSettingsOwnerRegistry` is verified in the game, above.)
 8. **Entity rows keyed by kind (not yet played)**: every entity name in the recordings made up to 0.1.3 was `<template>(Clone)` or `<template> <a beaver's name>`,
    and the checks cover both; that a new recording from a loaded save has one row per kind is step 7 below.
+9. **`AutoWatch = true` (not yet played)**: Harmony cannot apply a patch in the test process, so that the auto watch's patches on other mods' patch methods
+   are made, and that Harmony hands them the method the watch looks up, is only reasoned, not seen. Set `AutoWatch = true` in `PerformanceLog.cfg`, restart,
+   load a save with BeaverBuddies (or any mod that patches `TickableEntity.Tick`) and play 3 minutes. Check that `Player.log` says `Auto watch: watching N of M
+   patch methods...` with N > 0 and no warning, that the `frames.csv` header has `# capability|autoWatch|watching ...` and a `# watch|...|watching|auto|...`
+   line per method, that `profile.csv` has `method` rows for them (BeaverBuddies' `TickableEntityTickPatcher.Prefix` should be one of the busiest), that
+   `# capability-final|autoWatch|` says most of them were called, and what `overheadUs` costs compared with the same save with `AutoWatch = false`. A patch
+   method listed there as never seen called is either not called, called only off the game thread, or inlined by the runtime into the method it patches,
+   which no watch can see. A row whose `# watch|` line says `(can replace it)` is a prefix that may skip the game's method and do the work itself.
+
+10. **`AutoWatch` in co-op (not yet played)**: under BeaverBuddies every Harmony patch draws from the game's random numbers (MonoMod's
+    `DynamicMethodDefinition` calls `Guid.NewGuid`, which BeaverBuddies routes through `UnityEngine.Random`), and the auto watch patches after BeaverBuddies
+    has seeded them for the game. `Watch.KeepUnityRandom` puts the state back, so the game should play out the same; that is reasoned from the code, not seen.
+    Play two players connected with BeaverBuddies for 10 minutes or more, with `AutoWatch = true` for one player only (the case a difference would show
+    first), some of it at speed 3 or more, including a save: there must be no desync, and BeaverBuddies' own behaviour and `Player.log` must be as without it.
 
 ## Five-minute check in a game
 

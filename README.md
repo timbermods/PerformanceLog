@@ -68,7 +68,8 @@ front, and change one thing.
 - **What each measurement source could do** and whether it actually produced anything, so a zero is never mistaken for a measurement.
 - **What measuring itself costs**, per frame, in the file.
 
-Any method can also be timed by name (`Watch` in the config). See the file.
+Any method can also be timed by name (`Watch` in the config), and with `AutoWatch = true` so can the patch methods other mods put on the game's
+hot methods, each on its own row. See the file.
 
 ## Settings
 
@@ -78,7 +79,7 @@ rather than a rough scale-up. This costs a bit more than a lighter profile — s
 ever matters more than the detail.
 
 Six of the settings can be changed from Timberborn's **Mod Settings** menu, with no restart: they take effect from the next game or save you load.
-The rest — `Enabled`, `Profile`, `Watch` and `OutputFolder` — decide which parts of the game get patched, which is settled before that menu exists,
+The rest — `Enabled`, `Profile`, `Watch`, `AutoWatch` and `OutputFolder` — decide which parts of the game get patched, which is settled before that menu exists,
 so they live only in `PerformanceLog.cfg` (next to `manifest.json` in the mod's `version-1.1` folder) and need the game restarted after editing.
 Nothing here changes what the game simulates, so co-op players may use different values.
 
@@ -94,6 +95,7 @@ Nothing here changes what the game simulates, so co-op players may use different
 | `MaxSlowRowsPerMinute` | `300` | .cfg or Mod Settings | At most this many slow frames get a row a minute; the rest are only counted, so a game that is slow all the time cannot fill the disk. |
 | `OutputFolder` | *(empty)* | .cfg only | Where session folders go. Empty = `Documents\Timberborn\PerformanceLog`. |
 | `Watch` | *(none)* | .cfg only | Full names of methods to time: `Namespace.Type.Method`, separated by `;`, on as many lines as you like (at most 40 methods; every overload of a name is watched). Rows appear in `profile.csv` as kind `method`. |
+| `AutoWatch` | `false` | .cfg only | `true` = also time the patch methods other mods put on the game's hot methods, in the Watch slots the `Watch` entries leave (40 in all). See below. |
 
 The first time you open the Mod Settings page it starts from whatever `PerformanceLog.cfg` already says; after that, whatever you set there is what
 is used, and editing that number in the file no longer does anything (Mod Settings remembers it, not this mod).
@@ -109,12 +111,33 @@ method that runs thousands of times a tick costs more than watching a rare one. 
 (Harmony cannot patch them under Mono and the attempt can crash the game). A `# watch|` line in the `frames.csv` header, and the "What each measurement source
 could do" section of `summary.md`, say for each name whether it is being watched or why not.
 
+**`AutoWatch = true`** does this for the patches other mods put on the game's hot methods, without naming them. A mod's prefix on every entity's tick
+(BeaverBuddies has one) or on a singleton's `Tick` (Late Game Performance has several) runs inside a row that names the game or the singleton, so its cost
+is otherwise invisible. When the first game is loaded, the mod reads Harmony's list of patches and times other mods' prefixes, postfixes and finalizers:
+first those on the per-tick and per-frame methods behind the profile's own rows (a singleton's `Tick`, `UpdateSingleton`, `LateUpdateSingleton` or
+`StartParallelTick`, an entity's or a component's `Tick`), then those on the rest of the hot methods the header lists, in name order, in the slots the
+`Watch` entries leave free (40 methods in all; your `Watch` entries always come first). Patches on the game's random numbers, `Guid.NewGuid` and
+`DateTime.ToString` are left out (BeaverBuddies' co-op code, called very often); a `Watch` entry can still name one. Each gets a `method` row in `profile.csv`, named after the patch
+method and tagged with its mod, and a `# watch|...|auto|...` line in the `frames.csv` header saying which hot method it is on; the ones left out say why.
+It only adds its own timing patch around each patch method: no other mod's patch is removed, reordered or changed. It is off by default because every
+call of a watched method pays for the watch, and some of these run tens of thousands of times a second or more; compare `overheadUs` with it on and off. A
+patch another mod makes after the game has loaded is not seen, and a very small patch method may have been copied into the method it patches by the
+runtime, where no watch can see it (`# capability-final|autoWatch|` lists any that were never seen called). A prefix marked `(can replace it)` may skip
+the game's method and do its work itself, so its time is that work done instead of the game's, not on top of it.
+
+With BeaverBuddies, making any Harmony patch uses up some of the game's random numbers (BeaverBuddies makes `Guid.NewGuid` draw from them, and Harmony
+calls it for every patch), and the auto watch patches after the game has been seeded for co-op. It therefore puts the random state back exactly as it
+was once its patches are made, so the game plays out the same with it on or off and co-op players may still set it differently. That is reasoned from
+the code and not yet seen in a two-player game (`docs/TESTING.md`, item 10).
+
 ## Working with other mods
 
 The mod puts a timing wrapper in front of each of the game's singletons. It does this only on the first tick and first frame of a game, after every other mod's
 `Load` patches have run. So a mod that looks at those singletons (BeaverBuddies reorders the once-per-tick ones by their type) still sees the game's own, and the
 tick order is what it would be without this mod. It never replaces a game method and never skips the original. When another mod defers the game's save to the
 end of a tick (BeaverBuddies does), the `queued save` event reads about 0 ms and the real one is the `save (writing the world)` event.
+With `AutoWatch = true` it also puts its own timing prefix and postfix (Harmony id `kyler.performancelog.watch`) around other mods' patch methods
+on hot methods, when the first game loads; the other mods' patches, and the order they run in, stay as they were.
 
 ## What it costs, and what it cannot see
 

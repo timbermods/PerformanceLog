@@ -10,8 +10,9 @@ namespace PerformanceLog
     /// <summary>
     /// The in-game settings page (the Mod Settings mod, a required dependency). Only the six numbers <see cref="Session.Start"/> reads
     /// fresh at the start of every session are here, because they are the only ones that can change without restarting Timberborn:
-    /// <see cref="Config.Enabled"/>, <see cref="Config.Profile"/> and <see cref="Config.Watch"/> decide which Harmony patches this mod
-    /// makes, in <see cref="Plugin.StartMod"/>, which runs before Bindito (and so before Mod Settings) exists, so those three and
+    /// <see cref="Config.Enabled"/>, <see cref="Config.Profile"/>, <see cref="Config.Watch"/> and <see cref="Config.AutoWatch"/> decide which
+    /// Harmony patches this mod makes, from the config <see cref="Plugin.StartMod"/> reads before Bindito (and so before Mod Settings)
+    /// exists (the auto watch's patches are made when the first game loads, once per run of the game), so those four and
     /// <see cref="Config.OutputFolder"/> (a folder path; Mod Settings has no free-text widget that works with the game's own settings
     /// storage) stay in <c>PerformanceLog.cfg</c> only. This class is the only place that touches Mod Settings types, so nothing else
     /// depends on that assembly being loadable (it always is: a required mod).
@@ -19,7 +20,7 @@ namespace PerformanceLog
     public class PerformanceSettings : ModSettingsOwner
     {
         public ReadonlyTextModSetting Note { get; } = new ReadonlyTextModSetting(
-            ModSettingDescriptor.Create("Enabled, Profile, Watch and OutputFolder are set in PerformanceLog.cfg, next to this mod's manifest, " +
+            ModSettingDescriptor.Create("Enabled, Profile, Watch, AutoWatch and OutputFolder are set in PerformanceLog.cfg, next to this mod's manifest, " +
                 "and need Timberborn restarted (they decide which parts of the game get patched, before this menu exists). Everything below " +
                 "applies to the next game or save you load."),
             new ReadonlyTextModSetting.TextSettings());

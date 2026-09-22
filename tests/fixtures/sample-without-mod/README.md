@@ -94,6 +94,18 @@ Start by writing down what the complaint is, because the causes differ:
   nothing timed was running). An event posted while the game loads waits for `EventBus`'s `post-load` step, so its `[OnEvent]` handlers are charged
   there. The `# patch|other|` and `# patch|shared|` lines name these handlers in full; a `Watch` entry with that name times one, with every patch on it
   (kind `method`).
+- With `AutoWatch = true` in the config (the `# capability|autoWatch|` line says whether it was on and what it did), the patch methods other mods put on
+  hot methods are timed themselves: a `method` row each, named after the patch method (its class says what it is for, e.g.
+  `...TickableEntityTickPatcher.Prefix(TickableEntity)`, and `mod` is the mod that patches), and a `# watch|<method>|watching|auto|<prefix on
+  Namespace.Type.Method>|<owner>` line each in the header. It takes the patches on the methods behind the profile's own rows first (a singleton's
+  `Tick`, `UpdateSingleton`, `LateUpdateSingleton` or `StartParallelTick`, an entity's or component's `Tick`, whose time is otherwise inside a row that
+  names the game or the singleton's own mod), then the rest of the hot methods, in name order, in the Watch slots the config's `Watch` entries left
+  (40 in all), leaving out patches on the random numbers, `Guid.NewGuid` and `DateTime.ToString`; the `# watch|` lines of the ones left out say why. A patch method's time is inside the row of what it patches, so do not add the two.
+  One that `# capability-final|autoWatch|` lists as never seen called was either not called, called only off the game thread (the watch times the game
+  thread only), or so small that the runtime copied it into the method it patches, where no watch can see it: a missing row there is not a measurement of 0.
+  A `# watch|` line that says `(can replace it)` is a prefix that returns a bool: when it returns false the game's own method does not run, and the
+  prefix's row holds the work it did instead, so that time is the mod doing the game's job, not cost on top of it (compare a recording without that
+  mod to see what it saves or costs in all). A prefix that replaces a tick loop (`TickableBucketService.TickBuckets`, say) holds nearly the whole tick.
 - To be sure it is a mod, **compare two recordings** of the same save at the same speed with and without it:
   `python tools/perflog.py compare <folder A> <folder B>` (in the Performance Log repository). Say what else differed.
 
@@ -127,7 +139,7 @@ the last bucket is everything above), and `th0`..`th5` count frames that ran 0, 
 - `parallel-start`: A parallel singleton's StartParallelTick on the game thread: scheduling only, the work itself runs on worker threads and is not visible here. Every call is timed.
 - `entity`: All the ticks of one kind of entity (a prefab such as a beaver or a farm house). Only every Nth call is timed and the result is scaled up (see 'sampled').
 - `component`: All the ticks of one kind of entity component (a class such as Walker). Only every Nth call is timed and the result is scaled up. Only recorded with Profile = deep.
-- `method`: One method from the Watch list in the config, timed including everything inside it and every patch on it. Calls are counted exactly; the first call in each window and about every Nth after it are timed. N is chosen from the method's own calls in the last window it ran in and the share of the budget it splits with the other watched methods that ran then, so it widens while the method is busy or many watched methods are. It has a row for every window it ran in.
+- `method`: One method from the Watch list in the config, or (with AutoWatch) another mod's patch method on a hot method, timed including everything inside it and every patch on it. Calls are counted exactly; the first call in each window and about every Nth after it are timed. N is chosen from the method's own calls in the last window it ran in and the share of the budget it splits with the other watched methods that ran then, so it widens while the method is busy or many watched methods are. It has a row for every window it ran in.
 - `load`: A singleton's Load while the game was loading (one row per singleton, window 0).
 - `load-non-singleton`: A non-singleton loader's LoadNonSingletons while the game was loading (window 0).
 - `post-load`: A singleton's PostLoad while the game was loading (window 0).
