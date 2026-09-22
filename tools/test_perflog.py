@@ -245,6 +245,10 @@ class CompareTests(unittest.TestCase):
             a.pipes.append(["patch", "hot", "Timberborn.InputSystem.InputService.UpdateSingleton", "prefix", "old.mod", "priority=400", "index=0", "before=", "after=", "Old", "Old.P"])
             b.pipes.append(["patch", "other", "Timberborn.Navigation.NavigationSynchronizer.Tick", "postfix", "new.mod", "priority=400", "index=0", "before=", "after=", "New", "New.P"])
             b.pipes.append(["patch", "other", "Timberborn.Navigation.NavigationSynchronizer.LateUpdateSingleton", "postfix", "new.mod", "priority=400", "index=0", "before=", "after=", "New", "New.P"])
+            # This mod's own measuring patches (Profile = deep in B only) are how it measures, not a difference between the games.
+            for kind in ("prefix", "postfix"):
+                b.pipes.append(["patch", "hot", "Timberborn.TickSystem.MeteredTickableComponent.Tick", kind, "kyler.performancelog", "priority=800", "index=0", "before=", "after=",
+                                "PerformanceLog", "PerformanceLog.P"])
             for _ in range(8):
                 a.window()
                 b.window()
@@ -260,6 +264,21 @@ class CompareTests(unittest.TestCase):
             self.assertIn("2 patches", only_b[0])
             self.assertIn("new.mod 2", only_b[0])
             self.assertNotIn("same.mod", section, "a patch both have is not a difference")
+            self.assertNotIn("kyler.performancelog", section, "this mod's own patches are not a difference")
+        finally:
+            a.cleanup(); b.cleanup()
+
+    def test_patches_are_not_compared_when_one_session_did_not_record_them(self):
+        a, b = Synthetic(), Synthetic(header={"patches-unavailable": "InvalidOperationException no"})
+        try:
+            a.pipes.append(["patch", "hot", "Timberborn.TickSystem.TickableEntity.Tick", "prefix", "some.mod", "priority=400", "index=0", "before=", "after=", "Some", "Some.P"])
+            for _ in range(8):
+                a.window()
+                b.window()
+            _, text = run("compare", a.write(), b.write(), "--warmup", "0")
+            section = text.split("1. ARE THE TWO SESSIONS COMPARABLE?")[1].split("2. FRAME TIME")[0]
+            self.assertIn("not recorded in %s" % os.path.basename(b.dir), section)
+            self.assertNotIn("some.mod", section, "a missing list is not a list of missing patches")
         finally:
             a.cleanup(); b.cleanup()
 
@@ -729,6 +748,23 @@ class FindingTests(unittest.TestCase):
         self.assertIn("TickableEntity.Tick", hot)
         self.assertNotIn("Ticker.Update", hot, "a hot method only this mod patches is not listed")
         self.assertNotIn("LateUpdateSingleton", hot, "only hot methods are listed")
+
+    def test_no_hot_patch_list_without_hot_patches_by_other_mods(self):
+        def session(header=None):
+            s = Synthetic(header=header)
+            s.pipes.append(["patch", "hot", "Timberborn.TickSystem.Ticker.Update", "prefix", "kyler.performancelog", "priority=400", "index=0", "before=", "after=",
+                            "PerformanceLog", "PerformanceLog.P"])   # only this mod's own
+            for w in range(1, 9):
+                s.window(frame_ms=16.7, updMs=3.0)
+                s.profile.append({"kind": "update-singleton", "window": w, "tick": s.tick, "id": 0, "calls": 600, "sampled": 600, "ms": 300.0, "allocKB": 1,
+                                  "maxMs": 1, "name": "Timberborn.InputSystem.InputService", "assembly": "Timberborn.InputSystem", "mod": "game"})
+            return s
+        section = self.report(session()).split("6. WHERE THE TIME GOES")[1].split("7. GARBAGE COLLECTION")[0]
+        self.assertNotIn("hot methods other mods patch", section, "no heading over an empty list")
+        self.assertNotIn("not recorded", section)
+        section = self.report(session({"patches-unavailable": "InvalidOperationException no"})).split("6. WHERE THE TIME GOES")[1].split("7. GARBAGE COLLECTION")[0]
+        self.assertNotIn("hot methods other mods patch (", section)
+        self.assertIn("patches were not recorded", section, "a recording without the patch list says so, not that nothing is patched")
 
     def test_heap_mode_leaves_frames_with_a_collection_out_of_allocation_per_second(self):
         def session(source, final=None):

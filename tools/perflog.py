@@ -504,7 +504,12 @@ def short_method(name, width=58):
 
 
 def hot_patches(p, session, hot, args):
-    """Prints the hot methods (run every tick or frame) that other mods patch, with who patches them and how."""
+    """Prints the hot methods (run every tick or frame) that other mods patch, with who patches them and how. Nothing when there are none, and
+    a note instead when the recording could not list the patches (patches-unavailable), so an empty list is not read as 'nothing is patched'."""
+    if session.h("patches-unavailable"):
+        p("   (the patches were not recorded, so this report cannot say which other mods patch what: %s)" % session.h("patches-unavailable"))
+    if not hot:
+        return
     p("   hot methods other mods patch (the patches run inside whatever part of the frame calls the method):")
     shown = hot if args.all else hot[:args.top]
     for method, owners in shown:
@@ -516,8 +521,10 @@ def hot_patches(p, session, hot, args):
 
 
 def patch_set(session):
-    """Every patch in the header as (method, kind, owner). The tag is left out: it changes when another mod starts patching the same method."""
-    return {(method, kind, owner) for method, entries in patch_map(session).items() for _, kind, owner in entries}
+    """Every other mod's patch in the header as (method, kind, owner). The tag is left out: it changes when another mod starts patching the same
+    method. This mod's own patches are left out as in other_patchers: they follow its Profile setting and version, which compare lists apart."""
+    return {(method, kind, owner) for method, entries in patch_map(session).items() for _, kind, owner in entries
+            if owner and not owner.startswith(OWN_OWNER)}
 
 
 # ---------------------------------------------------------------- findings
@@ -1047,7 +1054,10 @@ def env_differences(a, b):
     ba, bb = {x[0] for x in a.pipe("bootconfig")}, {x[0] for x in b.pipe("bootconfig")}
     if ba != bb:
         lines.append("boot.config differs: only in %s: %s; only in %s: %s" % (a.label, sorted(ba - bb), b.label, sorted(bb - ba)))
-    pa, pb = patch_set(a), patch_set(b)
+    unrecorded = [s.label for s in (a, b) if s.h("patches-unavailable")]
+    if unrecorded:
+        lines.append("the patches by other mods were not recorded in %s, so they cannot be compared" % " or ".join(unrecorded))
+    pa, pb = (patch_set(a), patch_set(b)) if not unrecorded else (set(), set())
     for session, only in ((a, pa - pb), (b, pb - pa)):
         if not only:
             continue
