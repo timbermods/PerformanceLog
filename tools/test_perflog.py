@@ -546,7 +546,7 @@ class EntityRollupTests(unittest.TestCase):
             s.cleanup()
 
     def test_a_recording_whose_entity_rows_are_kinds_gets_no_split_note(self):
-        # A build of the fix that still says 0.1.3 (it is not released yet), and the checked-in fixture the mod's own code wrote.
+        # A build of the fix that still said 0.1.3 (made before the release), and the checked-in fixture the mod's own code wrote.
         s = Synthetic(header={"mod": "0.1.3"})
         add_entity_rows(s, NEW_ENTITY_ROWS)
         try:
@@ -557,7 +557,6 @@ class EntityRollupTests(unittest.TestCase):
             self.assertNotIn("rows named after single beavers", text)
         finally:
             s.cleanup()
-        self.assertEqual("0.1.3", perflog.load_session(WITH_MOD).h("mod"), "the fixture is old enough for the note to be in question")
         _, text = run("report", WITH_MOD, "--warmup", "10")
         self.assertNotIn("rows named after single beavers", text)
 

@@ -42,7 +42,7 @@ namespace PerformanceLog.Tests
             var header = new HeaderBuilder("frames", HeaderBuilder.FramesFormat);
             header.Add("session", "sample-" + (withMod ? "with-mod" : "without-mod"));
             header.Add("started", "2026-01-01 12:00:00 +00:00 local, 2026-01-01 12:00:00 UTC");
-            header.Add("mod", "0.1.3");
+            header.Add("mod", "0.1.4");
             header.Add("game", "1.1.2.4 (this is a made-up sample, not a game)");
             header.Add("unity", "6000.0.0f1");
             header.Add("os", "Windows 11 (10.0.26200) 64bit");
@@ -220,8 +220,8 @@ namespace PerformanceLog.Tests
             writer.SetFile(summary, Summary.Render(BuildInput(withMod, "finished")));
             writer.Stop();
             if (writer.Failure != null) throw new Exception("the sample writer failed: " + writer.Failure);
-            File.WriteAllText(Path.Combine(directory, "README.md"), SessionReadme.Render(ReadTemplate(), "0.1.3"));
-            File.WriteAllText(Path.Combine(directory, "columns.md"), SessionReadme.RenderColumns("0.1.3"));
+            File.WriteAllText(Path.Combine(directory, "README.md"), SessionReadme.Render(ReadTemplate(), "0.1.4"));
+            File.WriteAllText(Path.Combine(directory, "columns.md"), SessionReadme.RenderColumns("0.1.4"));
             Probe.TestClock = null;
             Probe.HeavySampler = null;
             Alloc.Init();
@@ -232,7 +232,7 @@ namespace PerformanceLog.Tests
         {
             var input = new SummaryInput
             {
-                SessionId = "sample-" + (withMod ? "with-mod" : "without-mod"), Status = status, ModVersion = "0.1.3", GameVersion = "1.1.2.4 (sample)",
+                SessionId = "sample-" + (withMod ? "with-mod" : "without-mod"), Status = status, ModVersion = "0.1.4", GameVersion = "1.1.2.4 (sample)",
                 StartedLocal = "2026-01-01 12:00:00", Seconds = Probe.SessionSeconds, Ticks = Probe.TickCount, Row = Probe.SessionRow(), Stats = Probe.Stats,
                 Worst = Probe.WorstFrames(), Windows = Probe.Windows(), Totals = Profile.Totals(), TickIntervalSeconds = 0.3, Folder = "sample",
                 Colony = "240 beavers, 12 bots, 9000 entities, day 20",

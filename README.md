@@ -4,17 +4,19 @@ A Timberborn 1.1 mod (built against **1.1.2.4**) that measures **where the game'
 person, or an AI assistant such as Claude, can read to find out why a game is slow. It is a diagnostic tool for finding performance problems in
 the game and in other mods. It does nothing else.
 
-Version **0.1.3** is a **preview**, published as a pre-release. Its automated checks run against the game's real assemblies.
+Version **0.1.4** is a **preview**, published as a pre-release. Its automated checks run against the game's real assemblies.
 Version 0.1.0 was the first to be played (a 31 minute session with nine mods, ending in a normal exit): every patch applied and the recording was complete.
 That first recording also showed several defects, fixed in 0.1.1. 0.1.2 added an in-game settings page, and 0.1.3 made the most detailed profile the default.
 0.1.1 and 0.1.3 have been played since. A 44 minute 0.1.3 recording with ten mods shows the new defaults working, and every 0.1.1 fix that a recording can show.
-Not verified yet: whether a value changed on the settings page reaches a recording.
+0.1.4 fixes what that recording showed (beavers split into one row each, the mod's own cost undercounted, slow frames blamed on the wrong singleton) and
+adds the opt-in `AutoWatch`; it has not been played yet. Not verified yet either: whether a value changed on the settings page reaches a recording.
 
 See [CHANGELOG.md](CHANGELOG.md) for what changed in each version, and [docs/TESTING.md](docs/TESTING.md) for what is and is not verified and how to check
 it in a game in five minutes. If a part fails to start, it says so in the log and the summary, that part stays off, and the game carries on.
 
 It only observes. It never records or replays an action, never uses the game's random numbers and never touches anything the simulation reads, so
-it should not cause a desync in co-op. (That has not been played in co-op yet.)
+it should not cause a desync in co-op. (That has not been played in co-op yet.) The one exception to watch is `AutoWatch`, off by default: under
+BeaverBuddies making a Harmony patch draws random numbers, so it puts them back after its patches (see below); keep it off in co-op until that has been played.
 
 ## Install
 
@@ -117,8 +119,9 @@ is otherwise invisible. When the first game is loaded, the mod reads Harmony's l
 first those on the per-tick and per-frame methods behind the profile's own rows (a singleton's `Tick`, `UpdateSingleton`, `LateUpdateSingleton` or
 `StartParallelTick`, an entity's or a component's `Tick`), then those on the rest of the hot methods the header lists, in name order, in the slots the
 `Watch` entries leave free (40 methods in all; your `Watch` entries always come first). Patches on the game's random numbers, `Guid.NewGuid` and
-`DateTime.ToString` are left out (BeaverBuddies' co-op code, called very often); a `Watch` entry can still name one. Each gets a `method` row in `profile.csv`, named after the patch
-method and tagged with its mod, and a `# watch|...|auto|...` line in the `frames.csv` header saying which hot method it is on; the ones left out say why.
+`DateTime.ToString` are left out (BeaverBuddies' co-op code, called very often); a `Watch` entry can still name one. Each gets a `method` row in
+`profile.csv`, named after the patch method and tagged with its mod, and a `# watch|...|auto|...` line in the `frames.csv` header saying which hot
+method it is on; the ones left out say why.
 It only adds its own timing patch around each patch method: no other mod's patch is removed, reordered or changed. It is off by default because every
 call of a watched method pays for the watch, and some of these run tens of thousands of times a second or more; compare `overheadUs` with it on and off. A
 patch another mod makes after the game has loaded is not seen, and a very small patch method may have been copied into the method it patches by the

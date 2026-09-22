@@ -48,7 +48,7 @@ packaging/       manifest.json, PerformanceLog.cfg. build.ps1 builds, tests and 
 
 ```
 .\build.ps1 -SkipTests                                  build + package
-dotnet run --project tests -c Release                   all C# checks (91 at 0.1.3; docs/TESTING.md keeps the current count)
+dotnet run --project tests -c Release                   all C# checks (113 at 0.1.4; docs/TESTING.md keeps the current count)
 python -m unittest discover -s tools -p "test_perflog.py"
 dotnet run --project tests -c Release -- --print-columns
 dotnet run --project tests -c Release -- --write-sample tests/fixtures/sample-with-mod

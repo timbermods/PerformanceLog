@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.1.4 (preview, not yet played)
+
+Fixes for what the first 0.1.3 recording (`2026-09-21_23-13-11`, 44 minutes, ten mods) showed, a more honest estimate of what the mod itself
+costs, and one new opt-in setting. Nothing here changes what the game simulates. Each fix has a check that fails without it; what needs the game
+to prove is listed in `docs/TESTING.md`.
+
+**Recording**
+- **Entity kinds are one row each again.** A beaver or bot loaded from a save was keyed by its own name (`BeaverAdult Malak`) and one born during
+  play by `BeaverAdult(Clone)`, so beavers ranked far too low: 14% of entity time instead of 85% in that recording. Entities are now keyed by kind
+  (the name up to its first space or `(`).
+- **`overheadUs` includes what the per-call patches really cost.** `patchCallNs` is now the real entity patch bodies (new `patchBodyNs` in the
+  `# calibration|` line) plus what Harmony adds. Up to 0.1.3 it timed an empty patch, so every recording shows `patchCallNs|0` and `overheadUs`
+  charged those calls either an assumed 40 ns or almost nothing. A watched method's call is charged the same figure and costs a little more, so
+  with `Watch` entries it is still slightly undercharged.
+- **Watched methods (`Watch`) are sampled at their own call rate**, chosen again every window they run in and sharing the watched methods' budget
+  between them. One busy method no longer leaves every watched method timed on about 1 call in 30 for the rest of the session. Every window a
+  watched method ran in has a row; a window where none of its calls could be timed is written with `sampled` 0 and no longer adds its calls at
+  0 ms to the totals.
+- **With the heap-size allocation counter** (every game so far), a frame with a garbage collection is counted as "allocation not measured", in a
+  new `# capability-final|allocSource|` line and in `summary.md`, and left out of the allocation-per-second figures instead of being read as 0 KB.
+- **New setting `AutoWatch`** (`PerformanceLog.cfg` only, **off by default**). It times the prefixes, postfixes and finalizers other mods put on the
+  game's hot methods, in the Watch slots the `Watch` entries leave (40 in all): first those on the methods behind the profile's rows (a
+  singleton's `Tick`/`UpdateSingleton`/`LateUpdateSingleton`/`StartParallelTick`, an entity's or component's `Tick`), then the rest of the hot
+  list, in name order. Patches on the random numbers, `Guid.NewGuid` and `DateTime.ToString` (BeaverBuddies' co-op code) are left out. Each gets
+  a `method` row and a `# watch|...|auto|...` header line; a prefix that can skip the game's method is marked `(can replace it)`. It patches once,
+  when the first game loads, changes no other mod's patch, and puts the game's random state back afterwards so BeaverBuddies co-op stays in
+  step. **Keep it off in co-op until it has been played in a two-player game** (`docs/TESTING.md`, item 10).
+
+**summary.md and `perflog.py`**
+- A slow frame is blamed on a singleton only if it took at least 10% of the frame or 5 ms. Otherwise the Blame cell says no singleton stood out,
+  and whether the frame had a save or a garbage collection (a 1 ms singleton was named as the cause of a 1.1 s save). A frame with no singleton
+  timed says nothing.
+- `otherMs` is split by Unity phase: the Update phase less the timed parts in it, the LateUpdate phase less `lateMs`, `plPost`, the phases
+  before Update, and the time between phases. The "not the game's code" finding now points at scripts when that is where the time is, and keeps
+  pointing at the graphics card or vertical sync when the wait is in `plPost` or before Update.
+- `report` names the other mods whose Harmony patches run inside a singleton's time and lists the hot methods other mods patch; `compare` lists
+  the other mods' patches that only one session has. A recording that could not list its patches says so.
+- Watched methods are named by class and method (`TickableEntityTickPatcher.Prefix(TickableEntity)`, not `Prefix(TickableEntity)`), and
+  `compare` no longer counts a method only one side watched as extra time.
+- Older recordings: `perflog.py` adds their entity rows up by kind, so `compare` lines 0.1.3 and 0.1.4 up, and prints a `KNOWN ISSUE` when a
+  recording's entity rows are split or its `overheadUs` understated the patches (or was a 40 ns guess).
+
 ## 0.1.3 (preview)
 
 **The defaults now capture the most detail a session can hold without anyone touching a setting**, so every recording made from a plain
