@@ -1,8 +1,8 @@
 # What has been checked, and how to check the rest in a game
 
-Version 0.1.0 was the first to run in a game (the first recording, below); 0.1.1 fixed what that showed, 0.1.2 added an in-game settings page, and 0.1.3
+Version 0.1.0 was the first to run in a game (the first recording, below). 0.1.1 fixed what that showed, 0.1.2 added an in-game settings page, and 0.1.3
 changed the defaults to `Profile = deep` and a wider sampling budget, for the most detail with nothing configured. 0.1.1 and 0.1.3 have both been played
-since, and a 0.1.3 recording (below) shows the `deep` default and every 0.1.1 fix a recording can show working. This is the honest list.
+since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1.1 fix that a recording can show. This is the honest list.
 
 ## Verified by the automated checks
 
@@ -52,7 +52,7 @@ Worked:
 - **Loading steps and the milestones**, and the summary rewritten every minute.
 - **Coexisting with Late Game Performance** (which patches the same save methods): both mods' patches were installed on the same methods without a failure; the header lists them side by side.
 
-Did not work, or was wrong (all fixed in 0.1.1, see the changelog): the wrapper swapping four times a frame, every game singleton labelled unknown, `workingMB` 0, files held open, no allocation on
+Did not work, or was wrong (all fixed in 0.1.1, see the changelog): the wrapper swapping four times a frame, every game singleton labeled unknown, `workingMB` 0, files held open, no allocation on
 loading steps, the `LoadAll never ran` counter, and `prDraw`/`prBatches` 0.
 
 Not available in this game, and not going to be: `GC Allocated In Frame`, `GC Allocation In Frame Count` and `Batches Count` do not exist in Unity 6's player (they are not in `UnityPlayer.dll`), and
@@ -72,7 +72,7 @@ What it shows, and the line that shows it:
   - Each singleton service is wrapped once: `# capability-final|patchCalls|singleton wrappers put in place|3` for the whole recording (0.1.0: 488601 in 122150 frames). Every 0.1.1 and
     0.1.3 recording that reached its closing lines says 2 to 5.
   - `workingMB` is 5587 to 7090 in the `S` rows, and `# capability|workingSet|from Windows`.
-  - The game's own singletons are labelled `game`: no singleton row in `profile.csv` has an empty `mod`.
+  - The game's own singletons are labeled `game`: no singleton row in `profile.csv` has an empty `mod`.
   - Loading steps carry the heap growth: 310 of the 618 loading rows in `profile.csv` have a non-zero `allocKB`, and `summary.md` lists the steps that grew the heap most
     (`WorldEntitiesLoader` 411 MB of 2212 MB in all steps).
   - `prDraw` is non-zero: `# capability-final|profilerRecorder|Draw Calls Count|produced values, largest 37554`, about 16.6 thousand draw calls a frame on average.
@@ -116,7 +116,7 @@ What it shows, and the line that shows it:
    - **Where an average frame goes** has non-zero `tickMs`/`entMs`/`updMs` and the parts add up (`otherMs` is the remainder).
    - **Simulation ticks** says a plausible number of ticks per second (about 3.3 at speed 1 if the tick is 0.3 s).
    - **Where the time goes** lists singletons with their mods (the game's own show as `game`; a mod you have enabled should show under its id).
-   - The **mod list** matches what you enabled.
+   - **Mods enabled** matches what you enabled.
 6. In the `frames.csv` header: `# thresholdMs: 77` (the value set in step 1, proving the settings page reached the session). Every `# capability|patch|...`
    line says `installed`, **including `MeteredTickableComponent.Tick`** (deep is the default now, so this should install without being asked); the
    `# capability-final|patchCalls|...` lines at the end say non-zero counts, and none says `never ran`, including `MeteredTickableComponent.Tick (sampled calls)`.
