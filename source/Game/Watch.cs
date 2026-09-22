@@ -135,20 +135,29 @@ namespace PerformanceLog
             ids = map;
         }
 
+        // Both run inside the watched method, which may be another mod's patch on a hot method: nothing may escape them into the game.
         internal static void WatchPrefix(MethodBase __originalMethod, out Sample __state)
         {
             __state = default;
-            if (!Probe.Enabled || !Probe.OnGameThread) return;
-            if (!ids.TryGetValue(__originalMethod, out int id)) return;
-            Probe.Count(Counter.PatchCalls);
-            __state = Profile.BeginMethod(id);
+            try
+            {
+                if (!Probe.Enabled || !Probe.OnGameThread || __originalMethod == null) return;
+                if (!ids.TryGetValue(__originalMethod, out int id)) return;
+                Probe.Count(Counter.PatchCalls);
+                __state = Profile.BeginMethod(id);
+            }
+            catch (Exception) { __state = default; }
         }
 
         internal static void WatchPostfix(MethodBase __originalMethod, Sample __state)
         {
             if (!__state.On) return;
-            Instrumentation.Hits[Instrumentation.HitWatch]++;
-            if (ids.TryGetValue(__originalMethod, out int id)) Profile.EndMethod(id, __state);
+            try
+            {
+                Instrumentation.Hits[Instrumentation.HitWatch]++;
+                if (__originalMethod != null && ids.TryGetValue(__originalMethod, out int id)) Profile.EndMethod(id, __state);
+            }
+            catch (Exception) { }
         }
 
         // ---- the auto watch ----

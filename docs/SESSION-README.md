@@ -100,7 +100,7 @@ Start by writing down what the complaint is, because the causes differ:
   Namespace.Type.Method>|<owner>` line each in the header. It takes the patches on the methods behind the profile's own rows first (a singleton's
   `Tick`, `UpdateSingleton`, `LateUpdateSingleton` or `StartParallelTick`, an entity's or component's `Tick`, whose time is otherwise inside a row that
   names the game or the singleton's own mod), then the rest of the hot methods, in name order, in the Watch slots the config's `Watch` entries left
-  (40 in all); the `# watch|` lines of the ones left out say why. A patch method's time is inside the row of what it patches, so do not add the two.
+  (40 in all), leaving out patches on the random numbers, `Guid.NewGuid` and `DateTime.ToString`; the `# watch|` lines of the ones left out say why. A patch method's time is inside the row of what it patches, so do not add the two.
   One that `# capability-final|autoWatch|` lists as never seen called was either not called, called only off the game thread (the watch times the game
   thread only), or so small that the runtime copied it into the method it patches, where no watch can see it: a missing row there is not a measurement of 0.
   A `# watch|` line that says `(can replace it)` is a prefix that returns a bool: when it returns false the game's own method does not run, and the

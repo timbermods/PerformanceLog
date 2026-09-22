@@ -116,7 +116,8 @@ could do" section of `summary.md`, say for each name whether it is being watched
 is otherwise invisible. When the first game is loaded, the mod reads Harmony's list of patches and times other mods' prefixes, postfixes and finalizers:
 first those on the per-tick and per-frame methods behind the profile's own rows (a singleton's `Tick`, `UpdateSingleton`, `LateUpdateSingleton` or
 `StartParallelTick`, an entity's or a component's `Tick`), then those on the rest of the hot methods the header lists, in name order, in the slots the
-`Watch` entries leave free (40 methods in all; your `Watch` entries always come first). Each gets a `method` row in `profile.csv`, named after the patch
+`Watch` entries leave free (40 methods in all; your `Watch` entries always come first). Patches on the game's random numbers, `Guid.NewGuid` and
+`DateTime.ToString` are left out (BeaverBuddies' co-op code, called very often); a `Watch` entry can still name one. Each gets a `method` row in `profile.csv`, named after the patch
 method and tagged with its mod, and a `# watch|...|auto|...` line in the `frames.csv` header saying which hot method it is on; the ones left out say why.
 It only adds its own timing patch around each patch method: no other mod's patch is removed, reordered or changed. It is off by default because every
 call of a watched method pays for the watch, and some of these run tens of thousands of times a second or more; compare `overheadUs` with it on and off. A

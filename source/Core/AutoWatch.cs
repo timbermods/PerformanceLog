@@ -57,6 +57,11 @@ namespace PerformanceLog
         public const string NamedByWatch = "watched by a Watch entry";
         public const string NoFreeSlot = "skipped: no free Watch slot";
         public const string CanReplaceNote = "(can replace it)";
+        public const string LeftOut = "left out: a patch on the random numbers, Guid or clock co-op depends on (a Watch entry can still name it)";
+
+        // Hot methods whose patches the auto watch never takes by itself. BeaverBuddies patches these to keep co-op in step, they run very
+        // often, and in name order (System.* first) they would take the free slots ahead of the tick-loop patches the auto watch is for.
+        static readonly HashSet<string> leftOutTypes = new HashSet<string>(StringComparer.Ordinal) { "RandomNumberGenerator", "Guid", "DateTime" };
 
         sealed class Group
         {
@@ -65,6 +70,7 @@ namespace PerformanceLog
             public int Tier, KindOrder;
             public readonly SortedSet<string> On = new SortedSet<string>(StringComparer.Ordinal);
             public string Refused;
+            public bool LeftOut;
         }
 
         /// <summary>
@@ -76,7 +82,8 @@ namespace PerformanceLog
         /// rows (their time is inside a row that names someone else), then the rest of the hot list; within each, by the patched method's
         /// full name, then prefix, postfix, finalizer, then the patch method's name. A patch method a Watch entry already watches
         /// (<paramref name="watchedAlready"/>, by label) keeps that watch; one that is refused, or that <paramref name="watch"/> could not
-        /// patch (it returns why, or null once it has), takes no slot. The results are in that order, one for each patch method.
+        /// patch (it returns why, or null once it has), takes no slot, and so does a patch on the random numbers, Guid or DateTime
+        /// (<see cref="LeftOut"/>). The results are in that order, one for each patch method.
         /// </summary>
         public static List<AutoWatchResult> Plan(IEnumerable<AutoWatchCandidate> patches, string ownOwner, ICollection<string> watchedAlready,
             int freeSlots, Func<AutoWatchCandidate, string> watch)
@@ -91,6 +98,7 @@ namespace PerformanceLog
                 int tier = c.ProfileRow ? 0 : PatchFormat.IsHot(c.TypeName, c.MethodName) ? 1 : -1;
                 if (tier < 0) continue;
                 if (!groups.TryGetValue(c.Label, out Group g)) groups[c.Label] = g = new Group { Label = c.Label, Tier = int.MaxValue };
+                if (tier == 1 && c.TypeName != null && leftOutTypes.Contains(c.TypeName)) g.LeftOut = true;
                 g.On.Add(c.Kind + " on " + c.Target + (c.CanReplace && kindOrder == 0 ? " " + CanReplaceNote : ""));
                 if (Before(c, tier, kindOrder, g)) { g.First = c; g.Tier = tier; g.KindOrder = kindOrder; }
                 // Why a patch method cannot be watched does not depend on the hot method it is on; if the records disagree, the same one is kept whatever their order.
@@ -113,6 +121,7 @@ namespace PerformanceLog
                 var r = new AutoWatchResult { Candidate = g.First, On = string.Join("; ", g.On) };
                 if (watchedAlready != null && watchedAlready.Contains(g.Label)) r.Status = NamedByWatch;
                 else if (g.Refused != null) r.Status = g.Refused;
+                else if (g.LeftOut && g.Tier == 1) r.Status = LeftOut;   // one also behind a profile row is placed, and watched, with the rows
                 else if (used >= freeSlots) r.Status = NoFreeSlot;
                 else
                 {

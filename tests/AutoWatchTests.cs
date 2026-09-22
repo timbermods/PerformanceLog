@@ -104,16 +104,18 @@ namespace PerformanceLog.Tests
                 "a refused method is never patched, a failed patch leaves its slot to the next, and nothing is patched once the slots are used: " + string.Join(", ", tried));
             Equal("skipped: abstract or generic", results.Single(r => r.Candidate.Label == "LGP.Generic.Prefix()").Status);
             Equal("could not be patched: boom", results.Single(r => r.Candidate.Label == "MS.TextEditingInputPatch.Prefix()").Status);
-            Check(results.Where(r => !r.Watching && tried.IndexOf(r.Candidate.Label) < 0 && r.Candidate.Refused == null).All(r => r.Status.StartsWith("skipped: no free Watch slot")),
-                "the rest say there was no free slot: " + Labels(results));
-            Equal(4, results.Count(r => r.Status.StartsWith("skipped: no free Watch slot")));
+            Check(results.Where(r => !r.Watching && tried.IndexOf(r.Candidate.Label) < 0 && r.Candidate.Refused == null && r.Status != AutoWatch.LeftOut)
+                .All(r => r.Status.StartsWith("skipped: no free Watch slot")), "the rest say there was no free slot: " + Labels(results));
+            Equal(3, results.Count(r => r.Status.StartsWith("skipped: no free Watch slot")));
+            Equal(AutoWatch.LeftOut, results.Single(r => r.Candidate.Label == "BB.RandomPatch.Prefix(Int32,Int32)").Status,
+                "a patch on the random numbers co-op depends on is left out, whatever the slots");
             Check(AutoWatch.Describe(results).StartsWith("watching 3 of 9 "), AutoWatch.Describe(results));
 
             foreach (int free in new[] { 0, -2 })
             {
                 bool called = false;
                 List<AutoWatchResult> none = AutoWatch.Plan(Patches(), Own, new List<string>(), free, c => { called = true; return null; });
-                Check(!called && none.Count == Expected.Length && none.All(r => !r.Watching && r.Status.StartsWith("skipped: no free Watch slot")),
+                Check(!called && none.Count == Expected.Length && none.All(r => !r.Watching && (r.Status.StartsWith("skipped: no free Watch slot") || r.Status == AutoWatch.LeftOut)),
                     "with no free slot (" + free + ") nothing is patched: " + Labels(none));
             }
         }
@@ -135,7 +137,8 @@ namespace PerformanceLog.Tests
         {
             List<AutoWatchResult> first = AutoWatch.Plan(Patches(), Own, new List<string>(), Config.MaxWatched, c => null);
             Check(first.Select(r => r.Candidate.Label).SequenceEqual(Expected), "in name order: " + Labels(first));
-            Check(first.All(r => r.Watching && r.Status == AutoWatch.Watching), Labels(first));
+            Check(first.All(r => r.Candidate.Label == "BB.RandomPatch.Prefix(Int32,Int32)" ? r.Status == AutoWatch.LeftOut && !r.Watching
+                : r.Watching && r.Status == AutoWatch.Watching), Labels(first));
             Equal("finalizer on " + Connected + "; finalizer on " + ConnectedWith, first.Single(r => r.Candidate.Label == "BB.DistrictFix.Finalizer(Exception)").On,
                 "one watch for a patch method on two hot methods, naming both");
             Equal("prefix on " + EntityTick, first.Single(r => r.Candidate.Label == "BB.EntityPatch.Prefix(TickableEntity)").On);
