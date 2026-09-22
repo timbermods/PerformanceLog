@@ -291,7 +291,9 @@ namespace PerformanceLog
         /// patchCallNs 0: a reading of exactly 0 was charged as an assumed 40 ns, one just above 0 (under half a nanosecond) as itself, so overheadUs
         /// charged the patches either a guess or almost nothing. Both loops of the second part are warmed
         /// up first (the first call of a method is compiled, and a patched one goes through a freshly made wrapper), and the least of a few rounds
-        /// is taken, so one-off costs and the scheduler do not decide the figure.
+        /// is taken, so one-off costs and the scheduler do not decide the figure. Every patch call is charged this one figure, so a call of a
+        /// watched method (whose prefix also looks the method up, and needs Harmony to pass __originalMethod) is still charged somewhat less
+        /// than it costs.
         /// </summary>
         internal static void MeasurePatchCost()
         {

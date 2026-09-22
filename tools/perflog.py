@@ -49,14 +49,15 @@ LOAD_KINDS = ("load", "load-non-singleton", "post-load", "post-load-non-singleto
 
 # Up to 0.1.3 the `# calibration|` line's patchCallNs timed an empty patch instead of the patch bodies, and every recording shows 0 there. What
 # overheadUs charged each call of the per-call patches then depends on a reading the header rounds away: exactly 0 made the mod charge an assumed
-# 40 ns a call, a reading above 0 (under half a nanosecond) made it charge that. A row whose overheadUs is below 40 ns a patch call proves the second.
+# 40 ns a call, a reading above 0 made it charge that. A reading above 0 in the header, or a row whose overheadUs is below 40 ns a patch call, proves
+# the second, and an empty patch leaves the bodies out, so those calls were undercharged.
 # Neither note is printed for a recording whose calibration line has patchBodyNs (KNOWN_ISSUE_APPLIES): a build of the fix that still carries an
 # older version number measures the patch bodies already.
 PATCH_CHARGE_ASSUMED_NS = 40.0
 PATCH_COST_NOTE = ("overheadUs understates what the mod itself cost: every call of its per-call patches (entity ticks, components, watched "
-                   "methods; the patchCalls column) was charged almost nothing. patchCallNs in the `# calibration|` line timed an empty patch "
-                   "instead of the real bodies and came out just above 0 (this recording has rows whose overheadUs is below the 40 ns a patch "
-                   "call the mod assumes when that reading is exactly 0), so those calls (about 100,000 a second at speed 7 with Profile = deep) "
+                   "methods; the patchCalls column) was charged less than they cost. patchCallNs in the `# calibration|` line timed an empty patch "
+                   "instead of the real bodies and came out above 0 (the header says so, or this recording has rows whose overheadUs is below "
+                   "the 40 ns a patch call the mod assumes when that reading is exactly 0), so those calls (about 100,000 a second at speed 7 with Profile = deep) "
                    "are missing from overheadUs and from the 'measuring cost more than 2% of a frame' warning. The real bodies take a few "
                    "nanoseconds a call, plus what Harmony adds.")
 PATCH_COST_GUESS_NOTE = ("overheadUs's charge for the per-call patches (entity ticks, components, watched methods; the patchCalls column) is not "
@@ -90,16 +91,18 @@ KNOWN_ISSUES = [
 
 
 def _empty_patch_charges(session):
-    """For a recording whose `# calibration|` line has patchCallNs 0 and no patchBodyNs (an empty patch was timed, not the bodies): how many
-    rows ran patches, and how many of those were charged less than the 40 ns a patch call assumed for a reading of exactly 0. None otherwise."""
+    """For a recording whose `# calibration|` line has patchCallNs and no patchBodyNs (an empty patch was timed, not the bodies): how many
+    rows ran patches, how many of those were charged less than the 40 ns a patch call assumed for a reading of exactly 0, and the reading.
+    None otherwise."""
     calibration = session.pipe("calibration")
     if not calibration or any("patchBodyNs" in parts for parts in calibration):
         return None
     reading = [parts[i + 1] for parts in calibration for i in range(len(parts) - 1) if parts[i] == "patchCallNs"]
     try:
-        if not reading or float(reading[0]) != 0:
-            return None
+        ns = float(reading[0]) if reading else None
     except ValueError:
+        return None
+    if ns is None:
         return None
     ran = below = 0
     for r in session.rows:
@@ -110,17 +113,17 @@ def _empty_patch_charges(session):
         # overheadUs is a mean per frame, written to 0.1 us; patchCalls is the total over the row's frames.
         if (r.get("overheadUs", 0.0) + 0.05) * frames < PATCH_CHARGE_ASSUMED_NS / 1000.0 * calls:
             below += 1
-    return ran, below
+    return ran, below, ns
 
 
 def _patch_cost_was_understated(session):
     charges = _empty_patch_charges(session)
-    return charges is not None and charges[1] > 0
+    return charges is not None and charges[0] > 0 and (charges[1] > 0 or charges[2] > 0)
 
 
 def _patch_cost_was_a_guess(session):
     charges = _empty_patch_charges(session)
-    return charges is not None and charges[0] > 0 and charges[1] == 0
+    return charges is not None and charges[0] > 0 and charges[1] == 0 and charges[2] == 0
 
 
 def _entity_rows_are_split(session):

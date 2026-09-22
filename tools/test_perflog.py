@@ -624,6 +624,7 @@ class FindingTests(unittest.TestCase):
                 ("0.1.3", old, cheap, None, understated),
                 ("0.1.1", old, dear, dict(overheadUs=30.0, patchCalls=1000.0), understated),  # one slow frame at 30 ns a call proves it
                 ("0.1.0", old, dear, dict(overheadUs=45.0, patchCalls=1000.0), guess),
+                ("0.1.3", old[:-1] + ["2"], dear, None, understated),                         # read 2 ns: charged that, and the bodies left out
                 ("0.1.3", old, none, None, None),                                             # no patch ran: nothing to say
                 ("0.1.3", new, cheap, None, None),                                            # the bodies were measured
                 ("0.1.3", None, cheap, None, None),

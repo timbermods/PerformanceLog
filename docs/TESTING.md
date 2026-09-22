@@ -6,7 +6,7 @@ since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (100 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (50 checks).
+`dotnet run --project tests -c Release` (101 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (50 checks).
 
 | What | How |
 |---|---|
@@ -97,7 +97,9 @@ What it shows, and the line that shows it:
 2. **Overhead** measured against a game running without the mod. The mod's own estimate (0.1.0: 0.3% of a frame paused, 0.8% at speed 7) left out the wrapper swapping and used a default cost for a
    patch. 0.1.1 to 0.1.3 measured the patch cost on an empty patch, which shows 0 in every recording (`patchCallNs|0`): where it read exactly 0 the per-call patches were still charged the
    40 ns default, where it read a fraction of a nanosecond they were charged almost nothing (`perflog.py` says which when a recording's rows show it). The cost is now the real bodies
-   (`patchBodyNs`) plus what Harmony adds (`patchCallNs`), but that has not run in a game yet, and nobody has compared the frame rate with the mod off. See the checklist.
+   (`patchBodyNs`) plus what Harmony adds (`patchCallNs`), but that has not run in a game yet, and nobody has compared the frame rate with the mod off. See the checklist. The figure is
+   the entity patch's; a watched method's call (config `Watch`) costs somewhat more (a lookup, and Harmony passing `__originalMethod`) and is charged the same, so with `Watch`
+   entries `overheadUs` still undercharges a little.
 3. **Co-op**: with BeaverBuddies actually connected to another player. It has only been seen running with BeaverBuddies loaded in a single-player game.
 4. **`Ticker.FinishFullTick`** (one of the four save-stage patches) is counted inside `save stages`, so it has not been seen separately; the stages of three saves were recorded.
 5. **The mod attribution** (which DLL belongs to which mod) worked for the mods in the first recording (`beaverbuddies`, `Kyler.OptimizedLocalHousing`, `eMka.ModSettings`, `kyler.persistentworkareas`);
