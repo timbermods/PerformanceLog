@@ -206,12 +206,7 @@ namespace PerformanceLog
                 header.Pipe("capability", "patch", parts[0], parts.Length > 1 ? parts[1] : "", parts.Length > 2 ? parts[2] : "");
             }
             foreach (string result in Watch.Results) { string[] parts = result.Split('|'); header.Pipe("watch", parts[0], parts.Length > 1 ? parts[1] : ""); }
-            // patchBodyNs: the entity tick's prefix and postfix on a call that is not sampled; patchCallNs: that plus what Harmony adds, which is
-            // what overheadUs charges each patch call. Up to 0.1.3 there was no patchBodyNs, and patchCallNs (an empty patch) read 0.
-            header.Pipe("calibration", "clockReadNs", Ns(Probe.ClockReadTicks), "allocReadNs", Ns(Probe.AllocReadTicks), "scopePairNs", Ns(Probe.ScopePairTicks),
-                "samplePairNs", Ns(Probe.SamplePairTicks),
-                "patchBodyNs", Probe.PatchBodyTicks > 0 ? Ns(Probe.PatchBodyTicks, "F1") : "unmeasured",
-                "patchCallNs", Probe.PatchCallTicks > 0 ? Ns(Probe.PatchCallTicks, "F1") : "unmeasured (" + Ns(Probe.PatchCallTicksCharged) + " assumed)");
+            header.Pipe("calibration", Probe.CalibrationParts());
             header.Pipe("sampling", "budgetPercent", config.OverheadBudgetPercent.ToString(CultureInfo.InvariantCulture),
                 "note", "the intervals are chosen again every profile window; profile.csv says how many calls each row rests on");
             header.Pipe("histogram", "frameEdgesMs", string.Join(",", Columns.FrameEdgesMs.Select(e => e.ToString(CultureInfo.InvariantCulture))));
@@ -228,8 +223,6 @@ namespace PerformanceLog
             header.Append(patches);
             return header.Lines;
         }
-
-        static string Ns(double ticks, string format = "F0") => (ticks * 1e9 / Stopwatch.Frequency).ToString(format, CultureInfo.InvariantCulture);
 
         // ---- during the game ----
 

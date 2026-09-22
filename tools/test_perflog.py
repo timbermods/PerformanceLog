@@ -529,17 +529,33 @@ class FindingTests(unittest.TestCase):
             s.window()
         self.assertNotIn("KNOWN ISSUE", self.report(s), "an unreadable version is not guessed at")
 
-    def test_a_recording_whose_patch_cost_read_0_is_told_overhead_is_understated(self):
+    def test_a_recording_whose_patch_cost_read_0_is_told_what_overhead_charged_the_patches(self):
         old = ["calibration", "clockReadNs", "23", "allocReadNs", "12", "scopePairNs", "109", "samplePairNs", "51", "patchCallNs", "0"]
         new = ["calibration", "clockReadNs", "23", "allocReadNs", "12", "scopePairNs", "109", "samplePairNs", "51", "patchBodyNs", "6.2", "patchCallNs", "6.9"]
-        for version, calibration, expect in (("0.1.3", old, True), ("0.1.3", new, False), ("0.1.3", None, False), ("0.1.4", old, False)):
+        understated, guess = "overheadUs understates what the mod itself cost", "overheadUs's charge for the per-call patches"
+        # A 10 s window of 598.8 frames with 1000 patch calls a frame. overheadUs 10 us a frame is 10 ns a patch call, less than the 40 ns the mod
+        # charged when the empty patch read exactly 0, so the reading was above 0 and the patches were charged almost nothing. 50 us a frame is
+        # what the 40 ns charge (plus the other costs) gives, and could also be almost nothing plus a lot of sampling: it proves neither.
+        cheap, dear, none = dict(overheadUs=10.0, patchCalls=598800.0), dict(overheadUs=50.0, patchCalls=598800.0), dict(overheadUs=5.0)
+        for version, calibration, rows, slow, expect in (
+                ("0.1.3", old, cheap, None, understated),
+                ("0.1.1", old, dear, dict(overheadUs=30.0, patchCalls=1000.0), understated),  # one slow frame at 30 ns a call proves it
+                ("0.1.0", old, dear, dict(overheadUs=45.0, patchCalls=1000.0), guess),
+                ("0.1.3", old, none, None, None),                                             # no patch ran: nothing to say
+                ("0.1.3", new, cheap, None, None),                                            # the bodies were measured
+                ("0.1.3", None, cheap, None, None),
+                ("0.1.4", old, cheap, None, None)):
             s = Synthetic(header={"mod": version})
             if calibration:
                 s.pipes.append(calibration)
             for _ in range(6):
-                s.window()
+                s.window(**rows)
+            if slow:
+                s.slow_frame(60.0, **slow)
             text = self.report(s)
-            self.assertEqual(expect, "overheadUs understates what the mod itself cost" in text, (version, calibration))
+            case = (version, calibration and calibration[-4:], rows, slow)
+            self.assertEqual(expect == understated, understated in text, case)
+            self.assertEqual(expect == guess, guess in text, case)
 
     def test_the_loadall_counter_bug_of_0_1_0_is_not_reported_as_a_finding(self):
         for version, expect in (("0.1.0", False), ("0.1.1", True)):

@@ -552,14 +552,20 @@ namespace PerformanceLog.Tests
                 Equal(0, Profile.Count, "and leaves no keys behind");
                 // The same bodies timed here directly, the way the game runs them on almost every call: the log on, and the call not one of the
                 // sampled ones (an interval of 4096 samples about one call in 4096; those few cost more, which only makes this figure larger).
-                double body;
+                // The fastest of ten rounds, as the calibration takes the fastest of its rounds: one long loop is slowed by any other program
+                // that takes the CPU for a moment, and that would decide the comparison.
+                double body = double.MaxValue;
                 using (new Rig())
                 {
                     Profile.Configure(4096, 4096, 1);
-                    const int calls = 1000000;
-                    long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                    const int calls = 100000, rounds = 10;
                     for (int i = 0; i < calls; i++) { Instrumentation.EntityPrefix(out Sample sample); Instrumentation.EntityPostfix(null, sample); }
-                    body = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) / (double)calls;
+                    for (int round = 0; round < rounds; round++)
+                    {
+                        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                        for (int i = 0; i < calls; i++) { Instrumentation.EntityPrefix(out Sample sample); Instrumentation.EntityPostfix(null, sample); }
+                        body = Math.Min(body, (System.Diagnostics.Stopwatch.GetTimestamp() - t0) / (double)calls);
+                    }
                 }
                 double ns = 1e9 / System.Diagnostics.Stopwatch.Frequency;
                 Console.WriteLine("     charged per patch call " + (charged * ns).ToString("F2") + " ns; the entity patch bodies timed here " + (body * ns).ToString("F2") + " ns");

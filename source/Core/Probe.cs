@@ -110,6 +110,20 @@ namespace PerformanceLog
         /// <summary>What each patch call is charged in overheadUs: <see cref="PatchCallTicks"/>, or 40 ns when it could not be measured (the calibration line says so).</summary>
         public static double PatchCallTicksCharged => PatchCallTicks > 0 ? PatchCallTicks : 40e-9 * Stopwatch.Frequency;
 
+        /// <summary>
+        /// The header's `# calibration|` line after its kind: what each part of measuring costs, in nanoseconds. patchBodyNs is the entity tick's
+        /// prefix and postfix on a call that is not sampled; patchCallNs is that plus what Harmony adds, which is what overheadUs charges each patch
+        /// call. Up to 0.1.3 there was no patchBodyNs and patchCallNs (an empty patch) read 0; tools/perflog.py tells the two apart by patchBodyNs.
+        /// </summary>
+        public static string[] CalibrationParts() => new[]
+        {
+            "clockReadNs", Ns(ClockReadTicks), "allocReadNs", Ns(AllocReadTicks), "scopePairNs", Ns(ScopePairTicks), "samplePairNs", Ns(SamplePairTicks),
+            "patchBodyNs", PatchBodyTicks > 0 ? Ns(PatchBodyTicks, "F1") : "unmeasured",
+            "patchCallNs", PatchCallTicks > 0 ? Ns(PatchCallTicks, "F1") : "unmeasured (" + Ns(PatchCallTicksCharged) + " assumed)",
+        };
+
+        static string Ns(double ticks, string format = "F0") => (ticks * 1e9 / Stopwatch.Frequency).ToString(format, System.Globalization.CultureInfo.InvariantCulture);
+
         public static bool OnGameThread => Environment.CurrentManagedThreadId == mainThreadId;
 
         /// <summary>Simulation ticks since the log started.</summary>

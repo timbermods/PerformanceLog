@@ -93,6 +93,7 @@ namespace PerformanceLog.Tests
             yield return ("Probe: measuring cost is estimated for each frame", OverheadEstimate);
             yield return ("Probe: calibration measures something and leaves the probe clean", CalibrationWorks);
             yield return ("Probe: a patch body is timed with the log on and no call sampled, and the probe is left off and clean", UnsampledBodyTiming);
+            yield return ("Header: the calibration line names the patch body and patch call costs, and says when they were not measured", CalibrationLine);
             yield return ("Alloc: a counter is chosen, and a test source is followed", AllocSources);
             yield return ("Milestones: marks are kept in order and safe for the header", MilestoneLines);
             yield return ("PatchBuilder: hot, shared and other patches are listed, the mod's own are only counted", PatchReport);
@@ -667,6 +668,30 @@ namespace PerformanceLog.Tests
                 Equal(0.0, Probe.MeasureUnsampled(n => calls++), "nothing is measured while a log runs");
                 Check(Probe.Enabled, "and the log is left running");
             }
+        }
+
+        static void CalibrationLine()
+        {
+            double body = Probe.PatchBodyTicks, call = Probe.PatchCallTicks;
+            try
+            {
+                // tools/perflog.py tells a recording that measured the patch bodies from an older one by the patchBodyNs name in this line.
+                double ticksPerNs = Stopwatch.Frequency / 1e9;
+                Probe.PatchBodyTicks = 8.27 * ticksPerNs;
+                Probe.PatchCallTicks = 8.97 * ticksPerNs;
+                string[] parts = Probe.CalibrationParts();
+                Equal("clockReadNs samplePairNs patchBodyNs patchCallNs", string.Join(" ", parts[0], parts[6], parts[8], parts[10]), "names");
+                Equal(12, parts.Length, "six name and value pairs");
+                Equal("8.3", parts[9], "patchBodyNs, to a tenth of a nanosecond");
+                Equal("9.0", parts[11], "patchCallNs, to a tenth of a nanosecond");
+                Probe.PatchBodyTicks = 0;
+                Probe.PatchCallTicks = 0;
+                parts = Probe.CalibrationParts();
+                Equal("unmeasured", parts[9], "patchBodyNs not measured");
+                Equal("unmeasured (40 assumed)", parts[11], "patchCallNs not measured says what overheadUs charges instead");
+                Check(parts.All(p => p.Length > 0 && p.IndexOf('|') < 0 && p.IndexOf(',') < 0 && p.IndexOf('\n') < 0), "no part holds a separator");
+            }
+            finally { Probe.PatchBodyTicks = body; Probe.PatchCallTicks = call; }
         }
 
         // ---- allocation counter, milestones ----

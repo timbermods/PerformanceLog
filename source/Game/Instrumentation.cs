@@ -287,8 +287,9 @@ namespace PerformanceLog
         /// What each call of the per-call patches (entity ticks, components, watched methods) costs, for overheadUs. Two parts: the bodies of the
         /// entity tick's prefix and postfix on a call that is not sampled (almost every call; a sampled call's extra cost is charged separately),
         /// timed directly with the log on; and what Harmony adds to call a prefix and a postfix, by patching a method of our own with empty ones
-        /// of the same shape (patched minus unpatched, never below 0). Up to 0.1.3 only the second part was measured; in the game it came out
-        /// under half a nanosecond, so every recording said patchCallNs 0 and overheadUs left the patches out. Both loops of the second part are warmed
+        /// of the same shape (patched minus unpatched, never below 0). Up to 0.1.3 only the second part was measured, and every recording says
+        /// patchCallNs 0: a reading of exactly 0 was charged as an assumed 40 ns, one just above 0 (under half a nanosecond) as itself, so overheadUs
+        /// charged the patches either a guess or almost nothing. Both loops of the second part are warmed
         /// up first (the first call of a method is compiled, and a patched one goes through a freshly made wrapper), and the least of a few rounds
         /// is taken, so one-off costs and the scheduler do not decide the figure.
         /// </summary>

@@ -47,12 +47,22 @@ KIND_TITLES = collections.OrderedDict([
 SLOW_MEAN_MS = 20.0
 LOAD_KINDS = ("load", "load-non-singleton", "post-load", "post-load-non-singleton")
 
-# Printed only for a recording whose calibration line has no patchBodyNs (KNOWN_ISSUE_APPLIES): a build of the fix that still carries an older
-# version number measures the patch bodies already.
+# Up to 0.1.3 the `# calibration|` line's patchCallNs timed an empty patch instead of the patch bodies, and every recording shows 0 there. What
+# overheadUs charged each call of the per-call patches then depends on a reading the header rounds away: exactly 0 made the mod charge an assumed
+# 40 ns a call, a reading above 0 (under half a nanosecond) made it charge that. A row whose overheadUs is below 40 ns a patch call proves the second.
+# Neither note is printed for a recording whose calibration line has patchBodyNs (KNOWN_ISSUE_APPLIES): a build of the fix that still carries an
+# older version number measures the patch bodies already.
+PATCH_CHARGE_ASSUMED_NS = 40.0
 PATCH_COST_NOTE = ("overheadUs understates what the mod itself cost: every call of its per-call patches (entity ticks, components, watched "
-                   "methods; the patchCalls column) was charged patchCallNs from the `# calibration|` line, which timed an empty patch and "
-                   "read 0, so those calls (about 100,000 a second at speed 7 with Profile = deep) count for nothing in overheadUs and in the "
-                   "'measuring cost more than 2% of a frame' warning. The real bodies take a few nanoseconds a call.")
+                   "methods; the patchCalls column) was charged almost nothing. patchCallNs in the `# calibration|` line timed an empty patch "
+                   "instead of the real bodies and came out just above 0 (this recording has rows whose overheadUs is below the 40 ns a patch "
+                   "call the mod assumes when that reading is exactly 0), so those calls (about 100,000 a second at speed 7 with Profile = deep) "
+                   "are missing from overheadUs and from the 'measuring cost more than 2% of a frame' warning. The real bodies take a few "
+                   "nanoseconds a call, plus what Harmony adds.")
+PATCH_COST_GUESS_NOTE = ("overheadUs's charge for the per-call patches (entity ticks, components, watched methods; the patchCalls column) is not "
+                         "a measurement. patchCallNs|0 in the `# calibration|` line timed an empty patch instead of the real bodies: a reading of "
+                         "exactly 0 made the mod charge an assumed 40 ns a call, one just above 0 made it charge almost nothing, and no row in "
+                         "this recording shows which. The real bodies take a few nanoseconds a call, plus what Harmony adds.")
 
 # What is wrong with recordings made by an older Performance Log, found when a recording was first read. Each entry is (fixed in, note): the note
 # is printed at the top of the report for a recording made by an earlier version, so nobody trusts a figure that was known to be off.
@@ -67,17 +77,47 @@ KNOWN_ISSUES = [
     ("0.1.1", "While the game ran, frames.csv, profile.csv, spikes.csv and events.csv were held open by the mod, so copying or zipping the folder could leave them out "
               "(the folder listing shows size 0). Exit the game first, or read them with shared access."),
     ("0.1.4", PATCH_COST_NOTE),
+    ("0.1.4", PATCH_COST_GUESS_NOTE),
 ]
 
 
-def _patch_cost_was_not_measured(session):
+def _empty_patch_charges(session):
+    """For a recording whose `# calibration|` line has patchCallNs 0 and no patchBodyNs (an empty patch was timed, not the bodies): how many
+    rows ran patches, and how many of those were charged less than the 40 ns a patch call assumed for a reading of exactly 0. None otherwise."""
     calibration = session.pipe("calibration")
-    return bool(calibration) and not any("patchBodyNs" in parts for parts in calibration)
+    if not calibration or any("patchBodyNs" in parts for parts in calibration):
+        return None
+    reading = [parts[i + 1] for parts in calibration for i in range(len(parts) - 1) if parts[i] == "patchCallNs"]
+    try:
+        if not reading or float(reading[0]) != 0:
+            return None
+    except ValueError:
+        return None
+    ran = below = 0
+    for r in session.rows:
+        calls, frames = r.get("patchCalls", 0.0), r.get("frames", 0.0)
+        if calls <= 0 or frames <= 0:
+            continue
+        ran += 1
+        # overheadUs is a mean per frame, written to 0.1 us; patchCalls is the total over the row's frames.
+        if (r.get("overheadUs", 0.0) + 0.05) * frames < PATCH_CHARGE_ASSUMED_NS / 1000.0 * calls:
+            below += 1
+    return ran, below
+
+
+def _patch_cost_was_understated(session):
+    charges = _empty_patch_charges(session)
+    return charges is not None and charges[1] > 0
+
+
+def _patch_cost_was_a_guess(session):
+    charges = _empty_patch_charges(session)
+    return charges is not None and charges[0] > 0 and charges[1] == 0
 
 
 # Notes that only some recordings of the versions they name have, each with the check that finds the problem in a recording (a note not listed
 # here is printed for every recording made before its fix).
-KNOWN_ISSUE_APPLIES = {PATCH_COST_NOTE: _patch_cost_was_not_measured}
+KNOWN_ISSUE_APPLIES = {PATCH_COST_NOTE: _patch_cost_was_understated, PATCH_COST_GUESS_NOTE: _patch_cost_was_a_guess}
 
 GAME_ASSEMBLY_PREFIXES = ("Timberborn.", "Bindito.", "UnityEngine", "Unity.", "System")
 
