@@ -13,6 +13,8 @@ namespace PerformanceLog.Tests
         {
             yield return ("Profile: a rare watched method next to a hot one is still timed in every window it runs", RareMethodNextToHotOne);
             yield return ("Profile: a watched method's interval widens with its own load, inside the budget, and comes back down when the load goes away", IntervalFollowsTheLoad);
+            yield return ("Profile: a watched method called fewer times a window than its interval still has a call timed in every window", FewCallsEveryWindow);
+            yield return ("Profile: a watched method that is busy in bursts keeps the interval its bursts need through the windows it is not called", BurstsStayInsideTheBudget);
             yield return ("Profile: a watched method that ran but was never timed gets a row with sampled 0 and adds no made-up 0 ms to the totals", UntimedWindowIsWrittenNotGuessed);
         }
 
@@ -103,6 +105,52 @@ namespace PerformanceLog.Tests
                     Check(row != null, "window " + w + ": no row");
                     Near(100, row[6], .01, "window " + w + ": 100 calls of 1 ms");
                     if (w >= 4) Check(row[5] >= 7, "window " + w + ": only " + row[5] + " of 100 calls were timed; the interval never came back down after the busy windows");
+                }
+            }
+        }
+
+        static void FewCallsEveryWindow()
+        {
+            Prepare();
+            using (rig)
+            {
+                // 3 calls a window at an interval of 8: without each window's countdown starting again at 1, whole windows go by untimed.
+                int id = Profile.RegisterMethod("Few.Method", "M", 8);
+                for (int w = 1; w <= 20; w++)
+                {
+                    for (int i = 0; i < 3; i++) Call(id, 1);
+                    Profile.FlushWindow(w, w, 10, rig.Prof);
+                    double[] row = RowOf(rig.ProfileRows(), id);
+                    Check(row != null && row[5] >= 1, "window " + w + ": 3 calls, none timed (" + (row == null ? "no row" : "sampled " + row[5]) + ")");
+                    Near(3, row[6], .01, "window " + w + ": 3 calls of 1 ms");
+                }
+            }
+        }
+
+        static void BurstsStayInsideTheBudget()
+        {
+            Prepare();
+            using (rig)
+            {
+                // Busy in the odd windows (200,000 calls in a 1 s window), not called at all in the even ones. The first burst is timed at the
+                // given interval, as nothing is known yet; every later one at the interval the burst before it asked for, which a window with no
+                // calls does not undo.
+                int id = Profile.RegisterMethod("Bursty.Method", "M", 8);
+                double pairSeconds = PairNs * 1e-9 + 100e-9;
+                for (int w = 1; w <= 5; w++)
+                {
+                    bool busy = w % 2 == 1;
+                    if (busy) for (int i = 0; i < 200000; i++) Call(id, 0.001);
+                    Profile.FlushWindow(w, w, 1, rig.Prof);
+                    double[] row = RowOf(rig.ProfileRows(), id);
+                    if (!busy) { Check(row == null, "window " + w + ": a row for a window the method was not called in"); continue; }
+                    Check(row != null, "window " + w + ": no row");
+                    Near(200, row[6], .01, "window " + w + ": 200,000 calls of 1 us");
+                    double share = row[5] * pairSeconds;
+                    Console.WriteLine("     burst window " + w + ": " + row[5] + " of 200000 calls timed, " + (share * 100).ToString("F3") + "% of a second");
+                    if (w >= 3)
+                        Check(share <= 0.01 * Profile.BudgetShareMethod * 1.05, "burst window " + w + ": measuring took " + (share * 100).ToString("F3") +
+                            "% of a second, over the watched methods' share of the budget: the quiet window before it undid the interval");
                 }
             }
         }

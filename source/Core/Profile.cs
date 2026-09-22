@@ -507,9 +507,11 @@ namespace PerformanceLog
 
         /// <summary>
         /// Chooses each watched method's interval for the next window from that method's own calls in this one, before they are forgotten.
-        /// It is set again every window and never below the interval the method was given, so a method that was busy once comes back down
-        /// when it quietens, and a rare one next to a busy one keeps its own. The methods' share of the budget is split between the methods
-        /// that ran. Each countdown starts again at 1, so a method that runs in the next window has its first call timed.
+        /// It is set again every window the method ran in and never below the interval the method was given, so a method that was busy once
+        /// comes back down when it runs less, and a rare one next to a busy one keeps its own. A window it did not run in says nothing about
+        /// its rate, so its interval is kept: a method that is busy in bursts is timed at the interval its last burst needed, not at the given
+        /// one. The methods' share of the budget is split between the methods that ran. Each countdown starts again at 1, so a method that
+        /// runs in the next window has its first call timed.
         /// </summary>
         static void AdaptMethods(double windowSeconds)
         {
@@ -527,10 +529,11 @@ namespace PerformanceLog
                     {
                         Entry e = entries[id];
                         if (e.Kind != ProfileKind.Method) continue;
-                        double wanted = measured && calls[id] > 0 ? Math.Ceiling(calls[id] / windowSeconds * pairSeconds / budget) : 0;
+                        methodCounter[id] = 1;
+                        if (calls[id] == 0) continue;
+                        double wanted = measured ? Math.Ceiling(calls[id] / windowSeconds * pairSeconds / budget) : 0;
                         int most = Math.Max(e.GivenInterval, 4096);
                         e.MethodInterval = wanted >= most ? most : Math.Max(e.GivenInterval, (int)wanted);
-                        methodCounter[id] = 1;
                     }
                 }
             }

@@ -6,7 +6,7 @@ the game running. This is the honest list.
 
 ## Verified by the automated checks
 
-`dotnet run --project tests -c Release` (96 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (46 checks).
+`dotnet run --project tests -c Release` (98 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (46 checks).
 
 | What | How |
 |---|---|
@@ -15,7 +15,7 @@ the game running. This is the honest list.
 | Failure containment: a failing clock switches the probe off, a full ring drops rows and counts them | `CoreTests` |
 | The cost charged for each patch call (`patchCallNs`) is at least what the entity patch's own bodies take on a call that is not sampled, timed with the log on and sampling held off (the part Harmony adds needs the game) | `CoreTests.UnsampledBodyTiming`, `GameBindingTests.PatchCostCoversTheBodies` |
 | The profile: exact singleton timing, scaled sampling, random gaps that do not alias with a repeating pattern, budget adaptation, spike attribution, mod resolution | `ProfileTests` |
-| Watched methods: each is sampled at its own rate, widening with its own load inside the budget and coming back down after, with a row (and at least one timing) for every window it ran in; calls nobody timed get a `sampled` 0 row and stay out of the totals | `WatchSamplingTests`, `test_perflog` |
+| Watched methods: each is sampled at its own rate, widening with its own load inside the budget, kept through windows it is not called in (so bursts stay inside it too) and coming back down when it runs less, with a row (and at least one timing) for every window it ran in; calls nobody timed get a `sampled` 0 row and stay out of the totals | `WatchSamplingTests`, `test_perflog` |
 | The files: header, columns, invariant number format in any language, text tails, events, a file rewritten whole, an unopenable path, dropped rows, flush on stop | `WriterTests` |
 | `summary.md`, `README.md` and `columns.md` generation | `SummaryTests`, `WriterTests.EndToEnd` |
 | Every patch target exists in the installed game (1.1.2.4), has no exception filter, and takes only parameters Harmony can supply | `GameBindingTests.TargetsResolve` |
