@@ -1,4 +1,4 @@
-# Columns of the Performance Log files (version 0.1.3)
+# Columns of the Performance Log files (version 0.1.4)
 
 Generated from the mod's own column definitions. `README.md` explains how to read the numbers; this file only says what each column is.
 

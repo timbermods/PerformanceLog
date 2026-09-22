@@ -8,7 +8,7 @@ Session `sample-with-mod`, status **finished**. This file is rewritten about onc
 |---|---|
 | Started | 2026-01-01 12:00:00 |
 | Recorded | 300 s (5.0 min), 17893 frames, 2440 simulation ticks |
-| Game / mod | Timberborn 1.1.2.4 (sample) / Performance Log 0.1.3 |
+| Game / mod | Timberborn 1.1.2.4 (sample) / Performance Log 0.1.4 |
 | Profile level | standard (slow frame = 50 ms or more; summary rows every 10 s) |
 | Colony at the last sample | 240 beavers, 12 bots, 9000 entities, day 20 |
 | Mods enabled | 3 (listed at the end) |
