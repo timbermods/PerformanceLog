@@ -6,6 +6,27 @@ since. A 0.1.3 recording (below) shows the `deep` default working, and every 0.1
 and adds the opt-in `AutoWatch`; it has not been played yet, so every 0.1.4 change still needs a recording to confirm it (the list and the five-minute
 check below say what to look for). This is the honest list.
 
+## Build and run the checks
+
+Install the .NET 8 SDK and Python 3, and have Timberborn and the **Harmony** and **Mod Settings** Workshop mods installed (the build references their DLLs):
+
+```powershell
+.\build.ps1 -GameDir 'C:\Program Files (x86)\Steam\steamapps\common\Timberborn'
+```
+
+builds the mod, runs the checks, and creates `dist\PerformanceLog-<version>.zip` (the version in `packaging/manifest.json`). `.\build.ps1 -Install` also copies it into
+your `Mods` folder. The checks alone:
+
+```
+dotnet run --project tests -c Release
+python -m unittest discover -s tools -p "test_perflog.py"
+```
+
+If Timberborn is not in the default Steam folder, pass `-GameDir` to `build.ps1` as above. To run the checks alone, give them the game folder too:
+`dotnet run --project tests -c Release -p:GameDir='<game folder>' -- --managed '<game folder>\Timberborn_Data\Managed'`.
+
+No game, Unity or Harmony DLLs are redistributed; they are only build references. See [CLAUDE.md](../CLAUDE.md) for how the code is laid out and how to change it.
+
 ## Verified by the automated checks
 
 `dotnet run --project tests -c Release` (113 checks) and `python -m unittest discover -s tools -p "test_perflog.py"` (65 checks).

@@ -18,6 +18,25 @@ Notes for a Claude session (or a person) changing this repository. For what the 
 5. **No NuGet packages.** The build must work offline (`NuGet.Config` clears all sources). Reach the game's internal members by reflection or Harmony's
    `AccessTools`, not by publicizing the assemblies.
 
+## Writing README and website text
+
+Kyler, 2026-09-24: "simplicity and elegance is effective and desirable." Every change to the README, the website
+text and the player docs follows these rules.
+
+- **Write for a Timberborn player** who wants to download, install and use the mod. Developer detail goes in
+  `docs/TESTING.md` (building, the checks, what is verified), this file, or `CHANGELOG.md`; link to it rather than
+  repeating it.
+- **Short.** One idea per sentence, most under about 20 words. A paragraph or FAQ answer is one to three sentences,
+  a troubleshooting answer a few numbered steps.
+- **Lead with the action.** Menu paths as arrow chains; on-screen labels in bold, exactly as in game.
+- **Say each thing once**, where a player would look for it; link to it elsewhere.
+- **Plain words.** No internals (class names, ids, formats) unless the player needs them to act.
+- **Cut** filler, repeated caveats, edge cases a player won't meet, and history ("since …", "no longer", older
+  builds). Describe the mod as it is now.
+- **Check every fact against the code** before writing it; changelogs lag.
+- **Keep, briefly:** credits, the unofficial line, the status, and safety facts.
+- **Reread as a new player before publishing.** Every step works as written, and nothing is said twice.
+
 ## Layout
 
 ```
@@ -69,7 +88,8 @@ To read the game's own code (the way every patch target here was checked): `ilsp
 - **Time another singleton-like array:** see `SingletonArrays.Swap<T>`; a wrapper implements the interface, calls the inner object, and uses `Profile.BeginExact/EndExact`.
 - **Add a finding to the analysis:** `findings_for` in `tools/perflog.py`. A finding needs evidence (numbers from the session) and a "next" step, must not fire on a healthy
   session (there are tests for that: `FindingTests`), and must say "consistent with", not "caused by", unless the data proves it.
-- **Release:** bump `<Version>` in `source/PerformanceLog.csproj` AND `Version` in `packaging/manifest.json` (build.ps1 refuses a mismatch), update `CHANGELOG.md`, run `.\build.ps1`,
+- **Release:** bump `<Version>` in `source/PerformanceLog.csproj` AND `Version` in `packaging/manifest.json` (build.ps1 refuses a mismatch), update `CHANGELOG.md` and the README's
+  status (by *Writing README and website text*, above), run `.\build.ps1`,
   tag `vX.Y.Z`, and create a GitHub release with `dist\PerformanceLog-X.Y.Z.zip`. Publish it as the latest release, not a pre-release (the README's install step says to
   pick the one marked Latest); the 0.x version says it is a preview, and `CHANGELOG.md` and `docs/TESTING.md` say what has not been played. **Do not add this mod to the
   timbermods catalog site or create a website for it until asked.**
@@ -139,3 +159,4 @@ Lessons from the first run that shape how to change this code:
 
 The measuring core descends from the frame rate log in the BeaverBuddies Stability Fork (`v1.0.10-perflog-preview2`, branch `perflog-preview`; see its `PERFORMANCE-LOG.md` and
 `RuntimeChecks/`). That log was embedded in BeaverBuddies' own code and timed its sync layer; this one hooks the game, so it works alone and with any mods.
+What was about the co-op layer is left out: the network and event-hash timings, the waits for the other player, and the garbage collection experiment.
