@@ -8,7 +8,7 @@ recording says so, and the game carries on.
 
 **Preview.** Version 0.1.4 has not been played yet; its automated checks run against the game's own code. Versions
 0.1.0, 0.1.1 and 0.1.3 have been played. A 44 minute 0.1.3 recording with ten mods showed the default settings working.
-Not yet seen in a game: a value changed in Mod Settings reaching a recording, and [co-op](#co-op-and-other-mods). See
+Not yet seen in a game: a value changed on the settings page reaching a recording, and [co-op](#co-op-and-other-mods). See
 [what has been checked](docs/TESTING.md) and the [changelog](CHANGELOG.md).
 
 ## What it records
@@ -76,11 +76,12 @@ front. Change one thing.
 The defaults record the most detail a session can hold, at a little more cost than a lighter profile. To measure more
 lightly, set `Profile = standard` or lower `OverheadBudgetPercent`.
 
-Six settings are in Mod Settings → **Performance Log**, and a change applies from the next game you load. The rest are
-only in `PerformanceLog.cfg`, in `Documents\Timberborn\Mods\PerformanceLog\version-1.1`; restart Timberborn after
-editing it. The Mod Settings page starts from the file's values, then keeps its own.
+Six settings are on the mod's settings page: open the **Mods** list (main menu, or Esc in a game) and press the
+settings button beside **Performance Log**. A change there applies from the next game you load. The rest are only in
+`PerformanceLog.cfg`, in `Documents\Timberborn\Mods\PerformanceLog\version-1.1`; restart Timberborn after editing it.
+The settings page starts from the file's values, then keeps its own.
 
-| In the file | In Mod Settings | Default | What it does |
+| In the file | On the settings page | Default | What it does |
 |---|---|---|---|
 | `Enabled` | | `true` | `false` turns the mod off: no patches, no files. |
 | `SlowFrameMs` | **Slow frame threshold (ms)** | `50` | A frame this long gets its own row in `frames.csv`. |

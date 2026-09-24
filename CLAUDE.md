@@ -120,11 +120,11 @@ To read the game's own code (the way every patch target here was checked): `ilsp
 - **Sampling uses random gaps** (mean N), not every Nth call: the game calls singletons in the same order every frame, and a fixed stride can land on the same few of them forever
   (`ProfileTests.NoAliasing`).
 - **`Columns` is initialised in textual order** (C# static field initialisers). Declare arrays before the groups that use them.
-- **Only some settings can live in the in-game Mod Settings menu** (`Settings.cs`, `PerformanceSettings`). `Plugin.StartMod` reads `PerformanceLog.cfg`
+- **Only some settings can live on the in-game settings page** (`Settings.cs`, `PerformanceSettings`). `Plugin.StartMod` reads `PerformanceLog.cfg`
   and decides `Enabled`/`Profile`/`Watch`/`AutoWatch` (which Harmony patches get made, including whether the entity tick is patched at all) before Bindito, and so
   Mod Settings, exists; making those live would mean re-patching the game while it runs or always paying for the entity-tick patch even when `Profile = off`
   asks not to. Only the six numbers `Session.Start` reads fresh each session (`SlowFrameMs`, `SummarySeconds`, `ProfileSeconds`, `OverheadBudgetPercent`,
-  `SpikeContributors`, `MaxSlowRowsPerMinute`) are in the menu; `SessionService.PostLoad` calls `PerformanceSettings.ApplyTo` to fold them onto `Plugin.Config`
+  `SpikeContributors`, `MaxSlowRowsPerMinute`) are on the page; `SessionService.PostLoad` calls `PerformanceSettings.ApplyTo` to fold them onto `Plugin.Config`
   before each `Session.Start`. A `ModSetting<T>`'s `.Value` is `default(T)` until Mod Settings calls `Load()` (which needs a real `ISettings`/`ModRepository`);
   what this mod controls at construction, and what `Load()` seeds `.Value` from the first time, is `.DefaultValue` — tests read that, not `.Value`.
 - **The auto watch is the one patching done after `StartMod`** (`Watch.AutoInstall`, from `Session.Start` when `AutoWatch = true`): once per run of the

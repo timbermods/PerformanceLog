@@ -154,8 +154,8 @@ What it shows, and the line that shows it:
 
 ## Five-minute check in a game
 
-1. Install (README, now including the **Mod Settings** mod), enable, open Mod Settings from the main menu and confirm **Performance Log** is listed with
-   its six sliders and the readonly note. Change `SlowFrameMs` to something distinctive, e.g. 77.
+1. Install (README, now including the **Mod Settings** mod), enable, open the **Mods** list from the main menu, press the settings button beside
+   **Performance Log** and confirm its six sliders and the readonly note. Change `SlowFrameMs` to something distinctive, e.g. 77.
 2. Start a game from a save, play **3 minutes with the game in front**, including a while at speed 3, then leave through the menu.
 3. Open `Documents\Timberborn\PerformanceLog\<newest folder>`. There should be `summary.md`, `frames.csv`, `profile.csv`, `spikes.csv`, `events.csv`, `README.md` and `columns.md`.
 4. In `Player.log`, search for `[PerformanceLog]`. Expect `Patches: N installed, 0 could not be made.` and `Recording to ...` and `Finished: ...`. Any warning names the part that is off.
