@@ -301,7 +301,7 @@ class CompareTests(unittest.TestCase):
         a, b = Synthetic(), Synthetic()
         entity = "BeaverBuddies.DeterminismService+TickableEntityTickPatcher.Prefix(TickableEntity)"
         try:
-            b.pipes.append(["watch", entity, "watching", "auto", "prefix on Timberborn.TickSystem.TickableEntity.Tick", "timbermods.BeaverBuddiesMultiColony"])
+            b.pipes.append(["watch", entity, "watching", "auto", "prefix on Timberborn.TickSystem.TickableEntity.Tick", "timbermods.TimberTogether"])
             for w in range(1, 9):
                 for s in (a, b):
                     s.window()
@@ -822,7 +822,7 @@ class FindingTests(unittest.TestCase):
         # (whose commas the CSV turns into ;).
         entity = "BeaverBuddies.DeterminismService+TickableEntityTickPatcher.Prefix(TickableEntity)"
         panel = "LateGamePerformance.UiThrottle.PanelPrefix(EntityPanel,Boolean)"
-        s.pipes.append(["watch", entity, "watching", "auto", "prefix on Timberborn.TickSystem.TickableEntity.Tick", "timbermods.BeaverBuddiesMultiColony"])
+        s.pipes.append(["watch", entity, "watching", "auto", "prefix on Timberborn.TickSystem.TickableEntity.Tick", "timbermods.TimberTogether"])
         s.pipes.append(["watch", panel, "watching", "auto", "prefix on Timberborn.EntityPanelSystem.EntityPanel.UpdateSingleton (can replace it)",
                         "kyler.lategameperformance.UiThrottle"])
         s.pipes.append(["watch", "Some.Mod.Method()", "watching"])
@@ -834,7 +834,7 @@ class FindingTests(unittest.TestCase):
         text = self.report(s)
         # A patch method is named by its class, not only as "Prefix", and says which hot method it is on and whose patch it is.
         self.assertIn("TickableEntityTickPatcher.Prefix(TickableEntity)", text)
-        self.assertIn("auto watch: prefix on Timberborn.TickSystem.TickableEntity.Tick (timbermods.BeaverBuddiesMultiColony)", text)
+        self.assertIn("auto watch: prefix on Timberborn.TickSystem.TickableEntity.Tick (timbermods.TimberTogether)", text)
         self.assertIn("auto watch: prefix on Timberborn.EntityPanelSystem.EntityPanel.UpdateSingleton (can replace it) (kyler.lategameperformance.UiThrottle)", text)
         self.assertRegex(text, r"Some\.Mod\.Method\(\)")
         self.assertEqual(2, text.count("auto watch: "), "a method the config's Watch named is not called an auto watch")

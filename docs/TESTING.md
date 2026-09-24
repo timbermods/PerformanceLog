@@ -67,7 +67,7 @@ the mod's probe rejected `GC.GetAllocatedBytesForCurrentThread` (the method is i
 
 ## Verified in a real game: 0.1.3 with its defaults (2026-09-21)
 
-Session `2026-09-21_23-13-11`: the same computer, game and Unity as the first recording, ten mods (BeaverBuddies MultiColony 1.4.0-beta2, Late Game Performance 0.4.23,
+Session `2026-09-21_23-13-11`: the same computer, game and Unity as the first recording, ten mods (Timber Together 1.4.0-beta2, Late Game Performance 0.4.23,
 MixedStorage 0.5.8, Hungry Pathing 0.1.0, Optimized Local Housing 1.0.1, Persistent Work Areas 0.1.3, The Tipsy Tail 0.2.7.0, Mod Settings, Harmony and this mod) and every
 setting at its default (the `# config:` header line). 43.9 minutes: 236917 frames and 25511 ticks (76% of the frames at speed 7), a colony of 359 beavers and 11.7 thousand
 entities, nine saves (eight queued, one on exit) and a normal exit (`session-end`, "the game was left"). The window was in the background for 81% of the frames, so this
